@@ -22,13 +22,7 @@ fi
 
 dotnet build src/ItsLoading/ItsLoading.csproj -c Release
 
-OUT="src/ItsLoading/bin/Release/net9.0"
-if [[ -f src/ItsLoading/mod_image.png ]]; then
-  # 打包图标 pck(v3 格式,游戏的 Godot 4.5.1 fork 实测可加载;勿用 Godot 4.7 的 PCKPacker,它写 v4 会被拒)
-  python3 tools/build_pck.py "$OUT/ItsLoading.pck" \
-    "ItsLoading/mod_image.png" src/ItsLoading/mod_image.png
-else
-  echo "!! 缺少 src/ItsLoading/mod_image.png(400x400),跳过 pck;游戏内将不显示图标" >&2
-fi
+# mod 图标由 dll 运行时从 mod 目录直接读取(Image API 认裸 PNG),
+# 无需 PCK —— ResourceLoader 在导出版游戏里加载不了未导入的 PNG
 echo
-echo "dll => $OUT/ItsLoading.dll"
+echo "dll => src/ItsLoading/bin/Release/net9.0/ItsLoading.dll"
