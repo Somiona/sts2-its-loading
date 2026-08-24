@@ -573,8 +573,9 @@ func takeover() -> void:
     /// <summary>
     /// 耗时测量依赖"我们在其他 mod 之前加载"(补丁装上后才能观测后续加载)。
     /// 新安装/改名后 mod_list 没有我们 → 排序沉底,只能观测到尾部。
-    /// 游戏 Initialize 结尾会按 _mods 顺序重建并保存 mod_list,
-    /// 所以把自己挪到 _mods[0] 即可让下次启动排最前(本次数据不完整属预期)。
+    /// 游戏 Initialize 结尾会按 _mods 顺序重建 mod_list,且优雅退出时由游戏
+    /// 自行保存设置——因此只做内存重排,绝不自己写用户的 settings.save。
+    /// (若首装后的第一次启动被强退,下次仍不完整,再下次自愈;可接受。)
     /// </summary>
     private static void EnsureFirstInLoadOrder()
     {
@@ -601,55 +602,6 @@ func takeover() -> void:
         mods.Insert(0, me);
         Log.Warn($"[ItsLoading] moved self to load order #0 (was #{idx + 1}, " +
                  $"{loadedBeforeUs} mods loaded before us) — full timing coverage from next boot");
-        PersistFirstInLoadOrder();
-    }
-
-    /// <summary>
-    /// 文件级持久化(内存重排覆盖优雅退出,这里覆盖强退):把所有账号的
-    /// settings.save 里本 mod 的条目原子地移到 mod_list 首位。游戏后续保存会用
-    /// 自己内存中的列表(已含重排)覆盖,两者一致。
-    /// </summary>
-    private static void PersistFirstInLoadOrder()
-    {
-        try
-        {
-            string steamDir = ProjectSettings.GlobalizePath("user://steam");
-            if (!Directory.Exists(steamDir)) return;
-            foreach (string save in Directory.EnumerateFiles(steamDir, "settings.save",
-                         SearchOption.AllDirectories))
-            {
-                var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(save));
-                var list = root?["mod_settings"]?["mod_list"] as System.Text.Json.Nodes.JsonArray;
-                if (list == null) continue;
-
-                int mine = -1;
-                for (int i = 0; i < list.Count; i++)
-                {
-                    if (list[i]?["id"]?.GetValue<string>() == "ItsLoading") { mine = i; break; }
-                }
-                if (mine == 0) continue;
-
-                var entry = System.Text.Json.Nodes.JsonNode.Parse(
-                    """
-                    {"id": "ItsLoading", "is_enabled": true, "source": "mods_directory"}
-                    """);
-                if (mine > 0)
-                {
-                    entry = list[mine];
-                    list.RemoveAt(mine);
-                }
-                list.Insert(0, entry);
-
-                string tmp = save + ".ilnew";
-                File.WriteAllText(tmp, root.ToJsonString());
-                File.Move(tmp, save, overwrite: true);
-                Log.Warn("[ItsLoading] settings reordered on disk: " + save);
-            }
-        }
-        catch (Exception e)
-        {
-            Log.Warn($"[ItsLoading] settings reorder skipped: {e.Message}");
-        }
     }
 
     // ================================================================ Harmony patches
