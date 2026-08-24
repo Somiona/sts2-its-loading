@@ -47,7 +47,10 @@ public static class ItsLoading
         Log.Warn($"[ItsLoading] v{typeof(ItsLoading).Assembly.GetName().Version} initializer " +
                  $"@ +{Sw.ElapsedMilliseconds}ms frame={Engine.GetFramesDrawn()}");
         _total = Math.Max(1, ModManager.Mods.Count);
+        // 时钟对表:把 C# Stopwatch 时间轴换算到引擎时间轴(gd 第 0 帧起算)
+        Recorder.EngineOffsetMs = (long)Time.GetTicksMsec() - Sw.Elapsed.TotalMilliseconds;
         Run("ensure boot splash installed", EnsureBootSplashInstalled);
+        Run("ensure first in load order", EnsureFirstInLoadOrder);
         // 顺序关键:先建好条并强制绘制一帧,再隐藏 autoload splash,保证无黑屏间隙
         Run("build bar", BuildBar);
         Run("boot splash handoff", HandoffFromBootSplash);
@@ -242,6 +245,19 @@ public static class ItsLoading
         var boot = ((SceneTree)Engine.GetMainLoop()).Root.GetNodeOrNull(AutoloadName);
         if (boot != null)
         {
+            // 引擎启动锚点(gd frame 0)+ 前奏阶段(引擎启动+工坊读取)时长
+            Variant anchor = boot.Get("boot_start_msec");
+            if (anchor.VariantType == Variant.Type.Int)
+            {
+                Recorder.BootAnchorMsec = anchor.AsInt64();
+                long nowMsec = (long)Time.GetTicksMsec();
+                if (Recorder.BootAnchorMsec >= 0)
+                {
+                    Recorder.PhaseSpans.Add(new Api.LoadSpan(
+                        "prelude(引擎启动+工坊读取)", Api.LoadPhase.Prelude,
+                        0, nowMsec - Recorder.BootAnchorMsec, ""));
+                }
+            }
             boot.Call("takeover");
             Log.Warn("[ItsLoading] boot splash handed over to mod bar");
         }
@@ -280,8 +296,10 @@ var _steam_n := 0
 var _seen_ids := {}
 var _steam_total := -1
 var _poll_acc := 0.0
+var boot_start_msec := 0
 
 func _ready() -> void:
+	boot_start_msec = Time.get_ticks_msec()
 	if _detect_state() != ""ok"":
 		_done = true
 		_cleanup_pending = true
@@ -552,6 +570,88 @@ func takeover() -> void:
 	print(""[LoadingBarBoot] splash dismissed at frame "", Engine.get_frames_drawn())
 ";
 
+    /// <summary>
+    /// 耗时测量依赖"我们在其他 mod 之前加载"(补丁装上后才能观测后续加载)。
+    /// 新安装/改名后 mod_list 没有我们 → 排序沉底,只能观测到尾部。
+    /// 游戏 Initialize 结尾会按 _mods 顺序重建并保存 mod_list,
+    /// 所以把自己挪到 _mods[0] 即可让下次启动排最前(本次数据不完整属预期)。
+    /// </summary>
+    private static void EnsureFirstInLoadOrder()
+    {
+        int loadedBeforeUs = ModManager.GetLoadedMods().Count();
+        var mods = AccessTools.Field(typeof(ModManager), "_mods").GetValue(null)
+            as System.Collections.Generic.List<Mod>;
+        if (mods == null)
+        {
+            Log.Warn("[ItsLoading] _mods not accessible — load order left as-is");
+            return;
+        }
+        int idx = mods.FindIndex(m => m.manifest?.id == "ItsLoading");
+        if (idx < 0) return;
+        if (idx == 0)
+        {
+            if (loadedBeforeUs > 1)
+            {
+                Log.Warn($"[ItsLoading] first in list but {loadedBeforeUs - 1} mods loaded before us?");
+            }
+            return;
+        }
+        var me = mods[idx];
+        mods.RemoveAt(idx);
+        mods.Insert(0, me);
+        Log.Warn($"[ItsLoading] moved self to load order #0 (was #{idx + 1}, " +
+                 $"{loadedBeforeUs} mods loaded before us) — full timing coverage from next boot");
+        PersistFirstInLoadOrder();
+    }
+
+    /// <summary>
+    /// 文件级持久化(内存重排覆盖优雅退出,这里覆盖强退):把所有账号的
+    /// settings.save 里本 mod 的条目原子地移到 mod_list 首位。游戏后续保存会用
+    /// 自己内存中的列表(已含重排)覆盖,两者一致。
+    /// </summary>
+    private static void PersistFirstInLoadOrder()
+    {
+        try
+        {
+            string steamDir = ProjectSettings.GlobalizePath("user://steam");
+            if (!Directory.Exists(steamDir)) return;
+            foreach (string save in Directory.EnumerateFiles(steamDir, "settings.save",
+                         SearchOption.AllDirectories))
+            {
+                var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(save));
+                var list = root?["mod_settings"]?["mod_list"] as System.Text.Json.Nodes.JsonArray;
+                if (list == null) continue;
+
+                int mine = -1;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    if (list[i]?["id"]?.GetValue<string>() == "ItsLoading") { mine = i; break; }
+                }
+                if (mine == 0) continue;
+
+                var entry = System.Text.Json.Nodes.JsonNode.Parse(
+                    """
+                    {"id": "ItsLoading", "is_enabled": true, "source": "mods_directory"}
+                    """);
+                if (mine > 0)
+                {
+                    entry = list[mine];
+                    list.RemoveAt(mine);
+                }
+                list.Insert(0, entry);
+
+                string tmp = save + ".ilnew";
+                File.WriteAllText(tmp, root.ToJsonString());
+                File.Move(tmp, save, overwrite: true);
+                Log.Warn("[ItsLoading] settings reordered on disk: " + save);
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Warn($"[ItsLoading] settings reorder skipped: {e.Message}");
+        }
+    }
+
     // ================================================================ Harmony patches
 
     private static void PatchLoader()
@@ -564,8 +664,17 @@ func takeover() -> void:
             return;
         }
         harmony.Patch(original,
+            prefix: new HarmonyMethod(typeof(ItsLoading), nameof(BeforeTryLoadMod)),
             postfix: new HarmonyMethod(typeof(ItsLoading), nameof(AfterModLoad)));
-        Log.Warn("[ItsLoading] TryLoadMod postfix installed OK");
+        Log.Warn("[ItsLoading] TryLoadMod prefix+postfix installed OK");
+    }
+
+    private static void BeforeTryLoadMod(Mod mod)
+    {
+        // 单次时钟读;mod 段总区间起点
+        Recorder.PrefixCalls++;
+        Recorder.ModStartTicks = Sw.ElapsedTicks;
+        if (Recorder.FirstModTicks < 0) Recorder.FirstModTicks = Recorder.ModStartTicks;
     }
 
     private static void AfterModLoad(Mod mod)
@@ -579,12 +688,26 @@ func takeover() -> void:
         Log.Warn($"[ItsLoading] [{_count}/{_total}] {id} -> {mod.state} " +
                  $"+{delta}ms frame={Engine.GetFramesDrawn()}");
 
+        // 耗时记录(prefix→postfix 真实区间,亚毫秒精度)
+        long nowTicks = Sw.ElapsedTicks;
+        Recorder.LastModTicks = nowTicks;
+        Recorder.ModSpans.Add(new Api.LoadSpan(
+            id, Api.LoadPhase.ModLoad,
+            Recorder.ToEngineMs(Recorder.ModStartTicks),
+            (nowTicks - Recorder.ModStartTicks) * Recorder.SwTicksToMs,
+            mod.state.ToString()));
+
         float frac = 0.25f + 0.35f * (_count / (float)_total);
         SetProgress(frac, $"模组加载 {_count}/{_total}", $"{id} · +{delta}ms");
 
         if (_count >= _total && !_done)
         {
             _done = true;
+            Recorder.PhaseSpans.Add(new Api.LoadSpan(
+                "mod_load", Api.LoadPhase.ModLoad,
+                Recorder.ToEngineMs(Recorder.FirstModTicks),
+                (Recorder.LastModTicks - Recorder.FirstModTicks) * Recorder.SwTicksToMs,
+                $"{_count} mods"));
             SetProgress(0.60f, "模组加载完成", $"共 {_count} 个 · {Sw.ElapsedMilliseconds}ms");
             Log.Warn($"[ItsLoading] all mods processed @ +{Sw.ElapsedMilliseconds}ms");
         }
@@ -615,8 +738,15 @@ func takeover() -> void:
             { "MainMenu", (0.88f, 1.00f) },
         };
 
-    // ConditionalWeakTable:session 结束后可被 GC,不阻止回收
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, object> SessionTotals = new();
+    // ConditionalWeakTable:session 结束后可被 GC,不阻止回收;值对象复用,无 per-frame 分配
+    private sealed class SessionStat
+    {
+        public int Total;
+        public long FirstTicks, LastTicks;
+        public bool Recorded;
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, SessionStat> SessionStats = new();
 
     private static void PatchBootPhases()
     {
@@ -695,11 +825,12 @@ func takeover() -> void:
     {
         try
         {
-            if (!UiOk || _barDead) return;
             if (_fName == null) CacheSessionFields(__instance.GetType());
 
             string name = _fName?.GetValue(__instance) as string ?? "";
             if (!SessionRanges.TryGetValue(name, out var range)) return;
+
+            if (!UiOk || _barDead) return;
 
             int remaining = Count(_fToLoad?.GetValue(__instance))
                           + Count(_fLoading?.GetValue(__instance))
@@ -707,19 +838,29 @@ func takeover() -> void:
                           + Count(_fVfx?.GetValue(__instance))
                           + ((_fVfxLoading?.GetValue(__instance) is true) ? 1 : 0);
             int loaded = _fTotal?.GetValue(__instance) as int? ?? 0;
+            long nowTicks = Sw.ElapsedTicks;
 
-            // 首次见到该会话时记录总数(已加载数 + 剩余数)
-            if (!SessionTotals.TryGetValue(__instance, out var boxed))
+            // 会话统计:首见记总数与起点,每帧只更新 LastTicks(一次字段写,零分配)
+            SessionStat stat = SessionStats.GetValue(__instance, _ => new SessionStat());
+            if (stat.Total <= 0)
             {
-                boxed = loaded + remaining;
-                SessionTotals.Add(__instance, boxed);
+                stat.Total = loaded + remaining;
+                stat.FirstTicks = nowTicks;
             }
-            int total = (int)boxed;
-            if (total <= 0) return;
+            stat.LastTicks = nowTicks;
+            if (stat.Total > 0 && remaining == 0 && !stat.Recorded)
+            {
+                stat.Recorded = true;
+                Recorder.SessionSpans.Add(new Api.LoadSpan(
+                    name, Api.LoadPhase.AssetSession,
+                    Recorder.ToEngineMs(stat.FirstTicks),
+                    (stat.LastTicks - stat.FirstTicks) * Recorder.SwTicksToMs,
+                    $"{loaded}/{stat.Total}"));
+            }
 
-            float local = 1f - remaining / (float)total;
+            float local = 1f - remaining / (float)stat.Total;
             float frac = range.Start + (range.End - range.Start) * local;
-            SetProgress(frac, $"资产加载 · {name}", $"{loaded}/{total} 个资源", forceDraw: false);
+            SetProgress(frac, $"资产加载 · {name}", $"{loaded}/{stat.Total} 个资源", forceDraw: false);
         }
         catch (Exception e)
         {
@@ -740,6 +881,19 @@ func takeover() -> void:
     private static void StepPrefix(MethodBase __originalMethod)
     {
         if (!StepMap.TryGetValue(__originalMethod, out var s)) return;
+        // 步骤级耗时:本步骤起点到下一检查点(相邻差分,无额外采样)
+        long nowTicks = Sw.ElapsedTicks;
+        if (Recorder.StepSpans.Count > 0 && Recorder.LastStepTicks >= 0)
+        {
+            var prev = Recorder.StepSpans[^1];
+            Recorder.StepSpans[^1] = prev with
+            {
+                DurationMs = (nowTicks - Recorder.LastStepTicks) * Recorder.SwTicksToMs,
+            };
+        }
+        Recorder.LastStepTicks = nowTicks;
+        Recorder.StepSpans.Add(new Api.LoadSpan(
+            s.Label, Api.LoadPhase.BootStep, Recorder.ToEngineMs(nowTicks), 0, ""));
         SetProgress(s.Progress, s.Label, $"启动步骤 · +{Sw.ElapsedMilliseconds}ms");
     }
 
@@ -751,9 +905,43 @@ func takeover() -> void:
         SetProgress(0.66f, "启动开场", $"云同步+存档读取完成 · +{Sw.ElapsedMilliseconds}ms");
     }
 
-    /// <summary>主菜单已显示(ExecuteDeferred 语义):进度拉满,标记死亡并移除。</summary>
+    /// <summary>主菜单已显示(ExecuteDeferred 语义):收尾最后一个步骤 span,冻结数据,移除 UI。</summary>
     private static void BeforeDeferred()
     {
+        // 关闭最后一个挂起的启动步骤 span
+        if (Recorder.StepSpans.Count > 0 && Recorder.LastStepTicks >= 0)
+        {
+            long nowTicks = Sw.ElapsedTicks;
+            var prev = Recorder.StepSpans[^1];
+            Recorder.StepSpans[^1] = prev with
+            {
+                DurationMs = (nowTicks - Recorder.LastStepTicks) * Recorder.SwTicksToMs,
+            };
+        }
+
+        if (Recorder.BootAnchorMsec >= 0)
+        {
+            Recorder.TotalBootMs = (long)Time.GetTicksMsec() - Recorder.BootAnchorMsec;
+        }
+        Api.LoadingDurations.Freeze();
+
+        // 一行启动摘要(诊断用,常量级日志)
+        if (Recorder.ModSpans.Count > 0)
+        {
+            var top = new System.Text.StringBuilder("[ItsLoading] boot ");
+            top.Append(Recorder.TotalBootMs.ToString("F0")).Append("ms")
+               .Append($" (prefix={Recorder.PrefixCalls} postfix={Recorder.ModSpans.Count})")
+               .Append("; slowest mods:");
+            foreach (var s in Recorder.ModSpans
+                         .OrderByDescending(m => m.DurationMs)
+                         .ThenBy(m => m.Id, StringComparer.Ordinal)
+                         .Take(3))
+            {
+                top.Append(' ').Append(s.Id).Append('=').Append(s.DurationMs.ToString("F0")).Append("ms");
+            }
+            Log.Info(top.ToString());
+        }
+
         SetProgress(1.0f, "启动完成", $"{Sw.ElapsedMilliseconds}ms");
         var tree = (SceneTree)Engine.GetMainLoop();
         var timer = tree.CreateTimer(2.0);
