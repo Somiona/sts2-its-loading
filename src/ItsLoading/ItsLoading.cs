@@ -57,6 +57,7 @@ public static class ItsLoading
         Run("patch loader", PatchLoader);
         Run("patch boot phases", PatchBootPhases);
         Run("patch mod info icon", PatchModInfoIcon);
+        Run("patch settings waterfall button", PatchSettingsWaterfallButton);
         Log.Warn($"[ItsLoading] watching {_total} mods");
         SetProgress(0.25f, $"模组加载 1/{_total}", "", true);
     }
@@ -602,6 +603,208 @@ func takeover() -> void:
         mods.Insert(0, me);
         Log.Warn($"[ItsLoading] moved self to load order #0 (was #{idx + 1}, " +
                  $"{loadedBeforeUs} mods loaded before us) — full timing coverage from next boot");
+    }
+
+    // ---------------------------------------------------------------- 设置界面:启动瀑布图
+    //
+    // 在设置界面的 mod 设置按钮(%ModdingButton,游戏原生)旁边加一个按钮,
+    // 打开本次启动的耗时瀑布图(数据来自 ItsLoading.Api,菜单阶段已冻结)。
+    // 条形用 anchor 分数定位(AnchorLeft = StartMs/Total),自动适配任意宽度。
+
+    private static CanvasLayer _waterfallLayer;
+
+    private static void PatchSettingsWaterfallButton()
+    {
+        var harmony = new Harmony("com.somiona.sts2.itsloading.waterfall");
+        var ready = AccessTools.Method(
+            AccessTools.TypeByName("MegaCrit.Sts2.Core.Nodes.Screens.Settings.NSettingsScreen"),
+            "_Ready");
+        if (ready == null)
+        {
+            Log.Warn("[ItsLoading] NSettingsScreen._Ready not found — waterfall button skipped");
+            return;
+        }
+        harmony.Patch(ready, postfix: new HarmonyMethod(typeof(ItsLoading), nameof(AfterSettingsReady)));
+        Log.Warn("[ItsLoading] settings waterfall button patch installed");
+    }
+
+    private static void AfterSettingsReady(object __instance)
+    {
+        Run("add waterfall button", () =>
+        {
+            var screen = (Control)__instance;
+            var modBtn = screen.GetNodeOrNull<Control>("%ModdingButton");
+            if (modBtn == null)
+            {
+                Log.Warn("[ItsLoading] %ModdingButton not found in settings screen");
+                return;
+            }
+            var parent = modBtn.GetParent();
+            var btn = new Button { Text = "启动瀑布图" };
+            btn.AddThemeFontSizeOverride("font_size", 16);
+            btn.AddThemeColorOverride("font_color", Colors.White);
+            btn.Pressed += ShowWaterfall;
+            parent.AddChild(btn);
+            parent.MoveChild(btn, Math.Min(modBtn.GetIndex() + 1, parent.GetChildCount() - 1));
+            Log.Warn("[ItsLoading] waterfall button added beside ModdingButton");
+        });
+    }
+
+    private static void ShowWaterfall()
+    {
+        Run("show waterfall", () =>
+        {
+            // 再按一次 = 关闭(toggle)
+            if (_waterfallLayer != null)
+            {
+                _waterfallLayer.QueueFree();
+                _waterfallLayer = null;
+                return;
+            }
+            var tree = (SceneTree)Engine.GetMainLoop();
+            Vector2 vs = tree.Root.GetVisibleRect().Size;
+
+            _waterfallLayer = new CanvasLayer { Layer = 1200 };
+
+            var dim = new ColorRect { Color = new Color(0f, 0f, 0f, 0.92f) };
+            dim.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+            dim.GuiInput += e =>
+            {
+                if (e is InputEventMouseButton mb && mb.Pressed)
+                {
+                    _waterfallLayer?.QueueFree();
+                    _waterfallLayer = null;
+                }
+            };
+            _waterfallLayer.AddChild(dim);
+
+            var title = new Label
+            {
+                Text = Api.LoadingDurations.IsReady
+                    ? $"启动瀑布图 · 总计 {Api.LoadingDurations.TotalBootMs / 1000.0:F1}s"
+                    : "启动瀑布图 · 数据未就绪(完整启动一次后可用)",
+            };
+            title.Position = new Vector2(48f, 24f);
+            title.AddThemeFontSizeOverride("font_size", 24);
+            _waterfallLayer.AddChild(title);
+
+            var close = new Button { Text = "✕ 关闭" };
+            close.Position = new Vector2(vs.X - 180f, 24f);
+            close.Pressed += () => Run("close waterfall", () =>
+            {
+                _waterfallLayer?.QueueFree();
+                _waterfallLayer = null;
+            });
+            _waterfallLayer.AddChild(close);
+
+            if (Api.LoadingDurations.IsReady)
+            {
+                BuildWaterfallChart(vs);
+            }
+
+            tree.Root.AddChild(_waterfallLayer);
+            Log.Info("[ItsLoading] waterfall opened");
+        });
+    }
+
+    private static Color WfColor(Api.LoadPhase p) => p switch
+    {
+        Api.LoadPhase.Prelude => new Color(0.55f, 0.57f, 0.62f, 1f),
+        Api.LoadPhase.ModLoad => new Color(0.20f, 0.85f, 0.90f, 1f),
+        Api.LoadPhase.BootStep => new Color(0.95f, 0.70f, 0.25f, 1f),
+        Api.LoadPhase.AssetSession => new Color(0.40f, 0.85f, 0.50f, 1f),
+        _ => Colors.White,
+    };
+
+    private static void BuildWaterfallChart(Vector2 vs)
+    {
+        double total = Math.Max(1.0, Api.LoadingDurations.TotalBootMs);
+
+        // 汇总所有 span,按时间轴排序
+        var rows = new System.Collections.Generic.List<Api.LoadSpan>();
+        rows.AddRange(Api.LoadingDurations.Phases);
+        rows.AddRange(Api.LoadingDurations.BootSteps);
+        rows.AddRange(Api.LoadingDurations.AssetSessions);
+        rows.AddRange(Api.LoadingDurations.ModLoads);
+        rows.Sort((a, b) => a.StartMs != b.StartMs
+            ? a.StartMs.CompareTo(b.StartMs)
+            : b.DurationMs.CompareTo(a.DurationMs));
+
+        // 滚动区(菜单阶段正常帧循环,Container 可用)
+        var scroll = new ScrollContainer();
+        scroll.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        scroll.OffsetTop = 80f;
+        scroll.OffsetBottom = -40f;
+        scroll.OffsetLeft = 48f;
+        scroll.OffsetRight = -48f;
+        _waterfallLayer.AddChild(scroll);
+
+        var box = new VBoxContainer
+        {
+            SizeFlagsHorizontal = (Control.SizeFlags.Fill | Control.SizeFlags.Expand),
+        };
+        scroll.AddChild(box);
+
+        // 时间轴刻度(每 5s)
+        var ruler = new Control
+        {
+            CustomMinimumSize = new Vector2(0, 22f),
+            SizeFlagsHorizontal = (Control.SizeFlags.Fill | Control.SizeFlags.Expand),
+        };
+        box.AddChild(ruler);
+        for (double t = 0; t <= total; t += 5000.0)
+        {
+            float frac = (float)(t / total);
+            var tick = new Label { Text = $"{t / 1000.0:F0}s" };
+            tick.AnchorLeft = frac;
+            tick.AddThemeFontSizeOverride("font_size", 12);
+            tick.AddThemeColorOverride("font_color", new Color(1f, 1f, 1f, 0.45f));
+            ruler.AddChild(tick);
+            var line = new ColorRect { Color = new Color(1f, 1f, 1f, 0.08f) };
+            line.AnchorLeft = frac;
+            line.AnchorRight = frac;
+            line.OffsetTop = 20f;
+            line.OffsetBottom = 2000f;
+            ruler.AddChild(line);
+        }
+
+        foreach (var s in rows)
+        {
+            var row = new HBoxContainer
+            {
+                CustomMinimumSize = new Vector2(0, 18f),
+                SizeFlagsHorizontal = (Control.SizeFlags.Fill | Control.SizeFlags.Expand),
+            };
+            box.AddChild(row);
+
+            var name = new Label
+            {
+                Text = $"{s.Id}  {s.DurationMs / 1000.0:F2}s",
+                CustomMinimumSize = new Vector2(340f, 18f),
+                ClipText = true,
+            };
+            name.AddThemeFontSizeOverride("font_size", 13);
+            name.AddThemeColorOverride("font_color", WfColor(s.Phase));
+            row.AddChild(name);
+
+            var barArea = new Control
+            {
+                CustomMinimumSize = new Vector2(0, 18f),
+                SizeFlagsHorizontal = (Control.SizeFlags.Fill | Control.SizeFlags.Expand),
+            };
+            row.AddChild(barArea);
+
+            float start = (float)(s.StartMs / total);
+            float end = (float)Math.Min(1.0, (s.StartMs + s.DurationMs) / total);
+            var bar = new ColorRect { Color = WfColor(s.Phase) };
+            bar.AnchorLeft = start;
+            bar.AnchorRight = Math.Max(end, start + 0.0015f);
+            bar.AnchorTop = 0f;
+            bar.AnchorBottom = 1f;
+            bar.OffsetTop = 4f;
+            bar.OffsetBottom = -4f;
+            barArea.AddChild(bar);
+        }
     }
 
     // ================================================================ Harmony patches
