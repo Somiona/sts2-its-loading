@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Version>0.7.1</Version>
+    <AssemblyName>ItsLoading</AssemblyName>
+    <RootNamespace>ItsLoading</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <!-- 进度条 UI 阶段再换 Godot.NET.Sdk(需要源生成器);当前纯静态类无需 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 直接引用游戏自带的程序集,保证版本与 v0.107.1 完全一致 -->
+    <Reference Include="GodotSharp">
+      <HintPath>libs/GodotSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="sts2">
+      <HintPath>libs/sts2.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>libs/0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

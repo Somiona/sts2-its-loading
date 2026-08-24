@@ -1,0 +1,21 @@
+# 本地计划文档,勿提交
+PLAN.md
+plan.md
+
+# AI 助手相关,勿提交
+.claude/
+agents/
+.agents/
+.cursor/
+
+# 构建产物
+src/*/bin/
+src/*/obj/
+
+# 游戏侧二进制(版权属于 MegaCrit / Godot / Harmony,构建时自动从本地游戏复制)
+src/*/libs/
+
+# 系统
+.DS_Store
+*.pyc
+__pycache__/
