@@ -1,10 +1,10 @@
 # 不再干等 · It's Loading
 
+<p align="center"><img src="src/ItsLoading/mod_image.png" width="200" alt="不再干等 · It's Loading"/></p>
+
 > 修复了塔2开 mod 没有进度条的 bug。
 >
 > Fixes the bug where Slay the Spire 2 shows no loading progress with mods enabled.
-
-<!-- TODO: 放一张启动过程的 GIF / 截图 -->
 
 ## 这是什么
 

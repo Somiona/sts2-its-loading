@@ -19,3 +19,4 @@ src/*/libs/
 .DS_Store
 *.pyc
 __pycache__/
+busy_cursor_reference/
