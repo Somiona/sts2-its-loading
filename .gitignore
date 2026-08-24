@@ -12,9 +12,6 @@ agents/
 src/*/bin/
 src/*/obj/
 
-# 游戏侧二进制(版权属于 MegaCrit / Godot / Harmony,构建时自动从本地游戏复制)
-src/*/libs/
-
 # 系统
 .DS_Store
 *.pyc

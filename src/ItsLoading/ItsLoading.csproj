@@ -11,19 +11,26 @@
     <!-- 进度条 UI 阶段再换 Godot.NET.Sdk(需要源生成器);当前纯静态类无需 -->
   </PropertyGroup>
 
+  <!-- 游戏安装位置自动发现(三平台;可用 local.props 或 -p:Sts2Dir= 覆盖) -->
+  <Import Project="Sts2PathDiscovery.props"/>
+
   <ItemGroup>
-    <!-- 直接引用游戏自带的程序集,保证版本与 v0.107.1 完全一致 -->
+    <!-- 引用直达本机游戏目录,仓库不含任何游戏侧二进制 -->
     <Reference Include="GodotSharp">
-      <HintPath>libs/GodotSharp.dll</HintPath>
+      <HintPath>$(Sts2DataDir)/GodotSharp.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="sts2">
-      <HintPath>libs/sts2.dll</HintPath>
+      <HintPath>$(Sts2DataDir)/sts2.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="0Harmony">
-      <HintPath>libs/0Harmony.dll</HintPath>
+      <HintPath>$(Sts2DataDir)/0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+
+  <Target Name="ReportSts2DataDir" BeforeTargets="BeforeBuild">
+    <Message Text="STS2 reference dir: $(Sts2DataDir)" Importance="high"/>
+  </Target>
 </Project>
