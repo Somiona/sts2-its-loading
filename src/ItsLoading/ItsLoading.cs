@@ -57,7 +57,6 @@ public static class ItsLoading
         Run("patch loader", PatchLoader);
         Run("patch boot phases", PatchBootPhases);
         Run("patch mod info icon", PatchModInfoIcon);
-        Run("patch settings waterfall button", PatchSettingsWaterfallButton);
         Log.Warn($"[ItsLoading] watching {_total} mods");
         SetProgress(0.25f, $"模组加载 1/{_total}", "", true);
     }
@@ -605,90 +604,48 @@ func takeover() -> void:
                  $"{loadedBeforeUs} mods loaded before us) — full timing coverage from next boot");
     }
 
-    // ---------------------------------------------------------------- 设置界面:启动瀑布图
+    // ---------------------------------------------------------------- 瀑布图入口(ModConfig 软依赖)
     //
-    // 在设置界面的 mod 设置按钮(%ModdingButton,游戏原生)旁边加一个按钮,
-    // 打开本次启动的耗时瀑布图(数据来自 ItsLoading.Api,菜单阶段已冻结)。
-    // 条形用 anchor 分数定位(AnchorLeft = StartMs/Total),自动适配任意宽度。
+    // 不再自制设置界面按钮(原生 Duplicate 方案与场景唯一名系统冲突,见 v0.9.x 教训)。
+    // 改为在 ModConfig 加载完成时(TryLoadMod postfix 天然逐 mod 触发)反射注册其
+    // 配置条目:零编译期依赖、manifest 零改动、ModConfig 缺失时静默跳过。
 
     private static CanvasLayer _waterfallLayer;
 
-    private static void PatchSettingsWaterfallButton()
+    private static void RegisterWaterfallInModConfig(Mod mod)
     {
-        var harmony = new Harmony("com.somiona.sts2.itsloading.waterfall");
-        var ready = AccessTools.Method(
-            AccessTools.TypeByName("MegaCrit.Sts2.Core.Nodes.Screens.Settings.NSettingsScreen"),
-            "_Ready");
-        if (ready == null)
+        var asm = mod.assembly;
+        if (asm == null)
         {
-            Log.Warn("[ItsLoading] NSettingsScreen._Ready not found — waterfall button skipped");
+            Log.Warn("[ItsLoading] ModConfig assembly unavailable — waterfall entry skipped");
             return;
         }
-        harmony.Patch(ready, postfix: new HarmonyMethod(typeof(ItsLoading), nameof(AfterSettingsReady)));
-        Log.Warn("[ItsLoading] settings waterfall button patch installed");
-    }
-
-    private static void AfterSettingsReady(object __instance)
-    {
-        Run("add waterfall button", () =>
+        var api = asm.GetType("ModConfig.ModConfigApi");
+        var entryType = asm.GetType("ModConfig.ConfigEntry");
+        var configEnum = asm.GetType("ModConfig.ConfigType");
+        if (api == null || entryType == null || configEnum == null)
         {
-            var screen = (Control)__instance;
-            var modBtn = screen.GetNodeOrNull<Control>("%ModdingButton");
-            if (modBtn == null)
-            {
-                Log.Warn("[ItsLoading] %ModdingButton not found in settings screen");
-                return;
-            }
+            Log.Warn("[ItsLoading] ModConfig API types not found — waterfall entry skipped");
+            return;
+        }
 
-            // 原生样式 = Duplicate 游戏自己的按钮(皮肤/悬停/音效/手柄全套),
-            // 点击行为由设置界面订阅 Released 信号挂接(逆向 NSettingsScreen._Ready 确认),
-            // 复制体无人订阅 → 白纸,我们用同款信号接瀑布图。
-            var dup = (Control)modBtn.Duplicate();
-            dup.Name = "ItsLoadingWaterfallBtn";
+        object entry = System.Activator.CreateInstance(entryType)!;
+        void Set(string prop, object value) =>
+            entryType.GetProperty(prop)?.SetValue(entry, value);
+        Set("Key", "waterfall");
+        Set("Label", "启动瀑布图");
+        Set("Description", "打开本次启动的耗时瀑布图(各阶段/各 mod 真实时长)");
+        Set("Type", System.Enum.Parse(configEnum, "Button"));
+        Set("ButtonText", "查看");
+        Set("OnChanged", new Action<object>(_ => ShowWaterfall()));
 
-            // 从 Modding 按钮向上找最近的布局容器,交给引擎排版
-            // (直接塞进非容器父节点 = 绝对坐标 0,0 → 盖住原按钮,v0.9.0 的教训)
-            Container list = null;
-            var chain = new System.Text.StringBuilder();
-            for (Node p = modBtn.GetParent(); p != null; p = p.GetParent())
-            {
-                chain.Append(p.Name).Append('(').Append(p.GetType().Name).Append(") ");
-                if (p is Container c && p is not ScrollContainer)
-                {
-                    list = c;
-                    break;
-                }
-            }
-            if (list == null)
-            {
-                Log.Warn("[ItsLoading] no layout container above ModdingButton: " + chain);
-                return;
-            }
-            // 已加过(设置界面复用时防重复)
-            foreach (var child in list.GetChildren())
-            {
-                if (child.Name == dup.Name) { dup.QueueFree(); return; }
-            }
-
-            int anchorIdx = modBtn.GetIndex();
-            if (modBtn.GetParent() != list)
-            {
-                Node row = modBtn.GetParent();
-                while (row.GetParent() != list && row.GetParent() != null) row = row.GetParent();
-                anchorIdx = row.GetIndex();
-            }
-            list.AddChild(dup);
-            list.MoveChild(dup, Math.Min(anchorIdx + 1, list.GetChildCount() - 1));
-
-            // 入树后 _Ready 已把标签设回"模组",覆盖为我们的文案(MegaLabel 接受纯字符串)
-            var label = dup.GetNodeOrNull<MegaCrit.Sts2.addons.mega_text.MegaLabel>("Label");
-            label?.SetTextAutoSize("启动瀑布图");
-
-            // 与游戏同款信号接行为(NClickableControl.SignalName.Released)
-            dup.Connect("Released", Callable.From(ShowWaterfall));
-            Log.Warn($"[ItsLoading] native waterfall button added into {list.Name}({list.GetType().Name}) " +
-                     $"@index {anchorIdx + 1}; ancestors: {chain}");
-        });
+        var entries = System.Array.CreateInstance(entryType, 1);
+        entries.SetValue(entry, 0);
+        api.GetMethod("Register", new[]
+        {
+            typeof(string), typeof(string), entries.GetType(),
+        })?.Invoke(null, new object[] { "ItsLoading", "不再干等 · It's Loading", entries });
+        Log.Warn("[ItsLoading] waterfall entry registered in ModConfig");
     }
 
     private static void ShowWaterfall()
@@ -892,6 +849,12 @@ func takeover() -> void:
             Recorder.ToEngineMs(Recorder.ModStartTicks),
             (nowTicks - Recorder.ModStartTicks) * Recorder.SwTicksToMs,
             mod.state.ToString()));
+
+        // ModConfig 加载完成的瞬间反射注册瀑布图入口(软依赖:缺失时静默跳过)
+        if (id == "ModConfig" && mod.state == ModLoadState.Loaded)
+        {
+            Run("register in ModConfig", () => RegisterWaterfallInModConfig(mod));
+        }
 
         float frac = 0.25f + 0.35f * (_count / (float)_total);
         SetProgress(frac, $"模组加载 {_count}/{_total}", $"{id} · +{delta}ms");
