@@ -46,6 +46,7 @@ public static class ItsLoading
     {
         Log.Warn($"[ItsLoading] v{typeof(ItsLoading).Assembly.GetName().Version} initializer " +
                  $"@ +{Sw.ElapsedMilliseconds}ms frame={Engine.GetFramesDrawn()}");
+        I18n.Init();
         _total = Math.Max(1, ModManager.Mods.Count);
         // 时钟对表:把 C# Stopwatch 时间轴换算到引擎时间轴(gd 第 0 帧起算)
         Recorder.EngineOffsetMs = (long)Time.GetTicksMsec() - Sw.Elapsed.TotalMilliseconds;
@@ -137,7 +138,7 @@ public static class ItsLoading
         _stepLabel.Position = new Vector2(24f, 8f);
         _stepLabel.AddThemeFontSizeOverride("font_size", 20);
         _stepLabel.AddThemeColorOverride("font_color", Colors.White);
-        _stepLabel.Text = $"模组加载 1/{_total}";
+        _stepLabel.Text = I18n.T("bar.mods", new() { ["n"] = "1", ["t"] = _total.ToString() });
         strip.AddChild(_stepLabel);
 
         _detailLabel = new Label();
@@ -164,13 +165,13 @@ public static class ItsLoading
         if (_injectedThisRun)
         {
             var hint = new Label();
-            hint.Text = "It's Loading · 已注入启动画面,自下次启动起全程可见";
+            hint.Text = I18n.T("hint.injected");
             hint.Position = new Vector2(24f, 24f);
             hint.AddThemeFontSizeOverride("font_size", 14);
             hint.AddThemeColorOverride("font_color", new Color(0.2f, 0.85f, 0.9f, 1f));
             _layer.AddChild(hint);
             var t = tree.CreateTimer(8.0);
-            t.Timeout += () => Run("hide injection hint", () => hint.QueueFree());
+            t.Timeout += () => Run("hide injection hint", () => { if (GodotObject.IsInstanceValid(hint)) hint.QueueFree(); });
         }
 
         // 必须直接 AddChild:同步突发期间 deferred 队列永远不会执行
@@ -297,9 +298,21 @@ var _seen_ids := {}
 var _steam_total := -1
 var _poll_acc := 0.0
 var boot_start_msec := 0
+var _lang_zh := false
 
 func _ready() -> void:
 	boot_start_msec = Time.get_ticks_msec()
+	_detect_language()
+
+func _detect_language() -> void:
+	for p in _settings_files():
+		var data = JSON.parse_string(FileAccess.get_file_as_string(p))
+		if data is Dictionary and data.get(""language"") is String:
+			_lang_zh = data.get(""language"") == ""zhs""
+			return
+
+func txt(zh: String, en: String) -> String:
+	return zh if _lang_zh else en
 	if _detect_state() != ""ok"":
 		_done = true
 		_cleanup_pending = true
@@ -673,14 +686,14 @@ func takeover() -> void:
             var title = new Label
             {
                 Text = Api.LoadingDurations.IsReady
-                    ? $"启动瀑布图 · 总计 {Api.LoadingDurations.TotalBootMs / 1000.0:F1}s"
-                    : "启动瀑布图 · 数据未就绪(完整启动一次后可用)",
+                    ? I18n.T("wf.title", new() { ["s"] = (Api.LoadingDurations.TotalBootMs / 1000.0).ToString("F1") })
+                    : I18n.T("wf.notReady"),
             };
             title.Position = new Vector2(48f, 24f);
             title.AddThemeFontSizeOverride("font_size", 24);
             _waterfallLayer.AddChild(title);
 
-            var close = new Button { Text = "✕ 关闭" };
+            var close = new Button { Text = I18n.T("wf.close") };
             close.Position = new Vector2(vs.X - 180f, 24f);
             close.Pressed += () => Run("close waterfall", () =>
             {
@@ -852,7 +865,7 @@ func takeover() -> void:
         }
 
         float frac = 0.25f + 0.35f * (_count / (float)_total);
-        SetProgress(frac, $"模组加载 {_count}/{_total}", $"{id} · +{delta}ms");
+        SetProgress(frac, I18n.T("bar.mods", new() { ["n"] = _count.ToString(), ["t"] = _total.ToString() }), $"{id} · +{delta}ms");
 
         if (_count >= _total && !_done)
         {
@@ -862,7 +875,7 @@ func takeover() -> void:
                 Recorder.ToEngineMs(Recorder.FirstModTicks),
                 (Recorder.LastModTicks - Recorder.FirstModTicks) * Recorder.SwTicksToMs,
                 $"{_count} mods"));
-            SetProgress(0.60f, "模组加载完成", $"共 {_count} 个 · {Sw.ElapsedMilliseconds}ms");
+            SetProgress(0.60f, I18n.T("bar.modsDone"), $"{_count} · {Sw.ElapsedMilliseconds}ms");
             Log.Warn($"[ItsLoading] all mods processed @ +{Sw.ElapsedMilliseconds}ms");
         }
     }
@@ -871,11 +884,11 @@ func takeover() -> void:
 
     private static readonly (string Type, string Method, string Label, float Progress)[] Steps =
     {
-        ("MegaCrit.Sts2.Core.Assets.AtlasManager", "LoadEssentialAtlases", "图集加载", 0.615f),
-        ("MegaCrit.Sts2.Core.Localization.LocManager", "Initialize", "本地化初始化", 0.625f),
-        ("MegaCrit.Sts2.Core.Models.ModelDb", "Init", "模型数据库构建", 0.635f),
-        ("MegaCrit.Sts2.Core.Models.ModelDb", "InitIds", "模型 ID 注册", 0.645f),
-        ("MegaCrit.Sts2.Core.Models.ModelDb", "Preload", "模型资源预载", 0.655f),
+        ("MegaCrit.Sts2.Core.Assets.AtlasManager", "LoadEssentialAtlases", "step.atlas", 0.615f),
+        ("MegaCrit.Sts2.Core.Localization.LocManager", "Initialize", "step.loc", 0.625f),
+        ("MegaCrit.Sts2.Core.Models.ModelDb", "Init", "step.modeldb", 0.635f),
+        ("MegaCrit.Sts2.Core.Models.ModelDb", "InitIds", "step.ids", 0.645f),
+        ("MegaCrit.Sts2.Core.Models.ModelDb", "Preload", "step.preload", 0.655f),
     };
 
     private static readonly System.Collections.Generic.Dictionary<MethodBase, (string Label, float Progress)> StepMap =
@@ -1014,7 +1027,7 @@ func takeover() -> void:
 
             float local = 1f - remaining / (float)stat.Total;
             float frac = range.Start + (range.End - range.Start) * local;
-            SetProgress(frac, $"资产加载 · {name}", $"{loaded}/{stat.Total} 个资源", forceDraw: false);
+            SetProgress(frac, I18n.T("bar.assets", new() { ["name"] = name }), I18n.T("bar.assetsCount", new() { ["n"] = $"{loaded}/{stat.Total}" }), forceDraw: false);
         }
         catch (Exception e)
         {
@@ -1024,12 +1037,12 @@ func takeover() -> void:
 
     private static void BeforeLogoPlay()
     {
-        SetProgress(0.82f, "播放开场动画", "可跳过(若已开启跳过则无此阶段)");
+        SetProgress(0.82f, I18n.T("bar.logo"), "");
     }
 
     private static void BeforeLoadMenu()
     {
-        SetProgress(0.88f, "加载主菜单", "");
+        SetProgress(0.88f, I18n.T("bar.menuIn"), "");
     }
 
     private static void StepPrefix(MethodBase __originalMethod)
@@ -1048,7 +1061,7 @@ func takeover() -> void:
         Recorder.LastStepTicks = nowTicks;
         Recorder.StepSpans.Add(new Api.LoadSpan(
             s.Label, Api.LoadPhase.BootStep, Recorder.ToEngineMs(nowTicks), 0, ""));
-        SetProgress(s.Progress, s.Label, $"启动步骤 · +{Sw.ElapsedMilliseconds}ms");
+        SetProgress(s.Progress, I18n.T(s.Label), $"+{Sw.ElapsedMilliseconds}ms");
     }
 
     /// <summary>logo/云同步后的启动收尾(LaunchMainMenu 调用点已逆向确认)。只处理一次。</summary>
@@ -1056,7 +1069,7 @@ func takeover() -> void:
     {
         if (_menuHandled) return;
         _menuHandled = true;
-        SetProgress(0.66f, "启动开场", $"云同步+存档读取完成 · +{Sw.ElapsedMilliseconds}ms");
+        SetProgress(0.66f, I18n.T("bar.opening"), $"+{Sw.ElapsedMilliseconds}ms");
     }
 
     /// <summary>主菜单已显示(ExecuteDeferred 语义):收尾最后一个步骤 span,冻结数据,移除 UI。</summary>
@@ -1096,7 +1109,7 @@ func takeover() -> void:
             Log.Info(top.ToString());
         }
 
-        SetProgress(1.0f, "启动完成", $"{Sw.ElapsedMilliseconds}ms");
+        SetProgress(1.0f, I18n.T("bar.done"), $"{Sw.ElapsedMilliseconds}ms");
         var tree = (SceneTree)Engine.GetMainLoop();
         var timer = tree.CreateTimer(2.0);
         timer.Timeout += () => Run("remove bar", () =>

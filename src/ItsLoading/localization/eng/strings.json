@@ -1,0 +1,21 @@
+{
+  "bar.starting": "Starting",
+  "bar.workshop": "Reading Workshop {n}/{t}",
+  "bar.mods": "Loading mods {n}/{t}",
+  "bar.modsDone": "Mods loaded",
+  "bar.assets": "Assets · {name}",
+  "bar.assetsCount": "{n} assets",
+  "bar.logo": "Playing intro",
+  "bar.menuIn": "Loading main menu",
+  "bar.opening": "Opening sequence",
+  "bar.done": "Ready",
+  "step.atlas": "Loading atlases",
+  "step.loc": "Initializing localization",
+  "step.modeldb": "Building model database",
+  "step.ids": "Registering model IDs",
+  "step.preload": "Preloading models",
+  "hint.injected": "It's Loading · boot splash injected, fully active from the next launch",
+  "wf.title": "Startup waterfall · {s}s total",
+  "wf.notReady": "Startup waterfall · data not ready (complete one full launch first)",
+  "wf.close": "✕ Close"
+}

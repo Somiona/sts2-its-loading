@@ -1,0 +1,21 @@
+{
+  "bar.starting": "正在启动",
+  "bar.workshop": "创意工坊读取 {n}/{t}",
+  "bar.mods": "模组加载 {n}/{t}",
+  "bar.modsDone": "模组加载完成",
+  "bar.assets": "资产加载 · {name}",
+  "bar.assetsCount": "{n} 个资源",
+  "bar.logo": "播放开场动画",
+  "bar.menuIn": "加载主菜单",
+  "bar.opening": "启动开场",
+  "bar.done": "启动完成",
+  "step.atlas": "图集加载",
+  "step.loc": "本地化初始化",
+  "step.modeldb": "模型数据库构建",
+  "step.ids": "模型 ID 注册",
+  "step.preload": "模型资源预载",
+  "hint.injected": "It's Loading · 已注入启动画面,自下次启动起全程可见",
+  "wf.title": "启动瀑布图 · 总计 {s}s",
+  "wf.notReady": "启动瀑布图 · 数据未就绪(完整启动一次后可用)",
+  "wf.close": "✕ 关闭"
+}

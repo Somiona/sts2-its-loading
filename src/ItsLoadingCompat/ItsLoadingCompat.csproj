@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
-    <Version>0.11.0</Version>
+    <Version>0.12.0</Version>
     <AssemblyName>ItsLoadingCompat</AssemblyName>
     <RootNamespace>ItsLoadingCompat</RootNamespace>
     <Nullable>disable</Nullable>

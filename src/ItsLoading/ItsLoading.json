@@ -3,7 +3,7 @@
   "name": "不再干等 · It's Loading",
   "author": "somiona",
   "description": "修复了塔2开 mod 没有进度条的 bug。/ Fixes the bug where Slay the Spire 2 shows no loading progress with mods enabled.",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "has_pck": true,
   "has_dll": true,
   "dependencies": [],

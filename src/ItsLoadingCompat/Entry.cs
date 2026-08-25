@@ -20,11 +20,11 @@ namespace ItsLoading
     /// 注意:BaseLib 的 ModPrefix 取自本类型的根命名空间(大写 + "-"),
     /// 命名空间必须是 ItsLoading → 本地化键 ITSLOADING-mod_title(pck 内
     /// localization/<语言>/settings_ui.json 提供按语言标题)。
-    /// 行标签 = 方法名(本地化缺失原文回退)。
+    /// 行/按钮标签走游戏 loc 表(键 ITSLOADING-OPEN_WATERFALL.title / ITSLOADING-VIEW.title,见 pck)。
     /// </summary>
     public sealed class WaterfallConfig : SimpleModConfig
     {
-        [ConfigButton("查看")]
-        public void 启动瀑布图() => global::ItsLoading.ItsLoading.CompatHooks.OpenWaterfall();
+        [ConfigButton("View")]
+        public void OpenWaterfall() => global::ItsLoading.ItsLoading.CompatHooks.OpenWaterfall();
     }
 }
