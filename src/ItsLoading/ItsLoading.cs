@@ -639,14 +639,49 @@ func takeover() -> void:
                 Log.Warn("[ItsLoading] %ModdingButton not found in settings screen");
                 return;
             }
-            var parent = modBtn.GetParent();
-            var btn = new Button { Text = "启动瀑布图" };
+            // 已加过(设置界面复用时防重复)
+            foreach (var child in modBtn.GetParent().GetChildren())
+            {
+                if (child.Name == "ItsLoadingWaterfallBtn") return;
+            }
+
+            // 从 Modding 按钮向上找最近的布局容器,把自己交给引擎排版
+            // (直接塞进非容器父节点 = 绝对坐标 0,0 → 盖住原按钮,v0.9.0 的教训)
+            Container list = null;
+            var chain = new System.Text.StringBuilder();
+            for (Node p = modBtn.GetParent(); p != null; p = p.GetParent())
+            {
+                chain.Append(p.Name).Append('(').Append(p.GetType().Name).Append(") ");
+                if (p is Container c && p is not ScrollContainer)
+                {
+                    list = c;
+                    break;
+                }
+            }
+            if (list == null)
+            {
+                Log.Warn("[ItsLoading] no layout container above ModdingButton: " + chain);
+                return;
+            }
+
+            var btn = new Button { Text = "启动瀑布图", Name = "ItsLoadingWaterfallBtn" };
             btn.AddThemeFontSizeOverride("font_size", 16);
             btn.AddThemeColorOverride("font_color", Colors.White);
             btn.Pressed += ShowWaterfall;
-            parent.AddChild(btn);
-            parent.MoveChild(btn, Math.Min(modBtn.GetIndex() + 1, parent.GetChildCount() - 1));
-            Log.Warn("[ItsLoading] waterfall button added beside ModdingButton");
+            list.AddChild(btn);
+            // 紧跟 Modding 按钮所在行之后
+            int anchorIdx = modBtn.GetIndex();
+            if (modBtn.GetParent() != list)
+            {
+                // modBtn 在子容器里:找到那个子容器在 list 中的位置
+                for (Node p = modBtn.GetParent(); p != null && p.GetParent() != list; p = p.GetParent()) { }
+                Node row = modBtn.GetParent();
+                while (row.GetParent() != list && row.GetParent() != null) row = row.GetParent();
+                anchorIdx = row.GetIndex();
+            }
+            list.MoveChild(btn, Math.Min(anchorIdx + 1, list.GetChildCount() - 1));
+            Log.Warn($"[ItsLoading] waterfall button added into {list.Name}({list.GetType().Name}) " +
+                     $"@index {anchorIdx + 1}; ancestors: {chain}");
         });
     }
 
