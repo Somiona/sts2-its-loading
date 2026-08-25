@@ -303,6 +303,14 @@ var _lang_zh := false
 func _ready() -> void:
 	boot_start_msec = Time.get_ticks_msec()
 	_detect_language()
+	if _detect_state() != ""ok"":
+		_done = true
+		_cleanup_pending = true
+		print(""[LoadingBarBoot] mod disabled or unsubscribed — bar suppressed, cleanup deferred"")
+	else:
+		_build_ui()
+		_skip_log_history()
+		print(""[LoadingBarBoot] splash ready at frame "", Engine.get_frames_drawn())
 
 func _detect_language() -> void:
 	for p in _settings_files():
@@ -313,14 +321,6 @@ func _detect_language() -> void:
 
 func txt(zh: String, en: String) -> String:
 	return zh if _lang_zh else en
-	if _detect_state() != ""ok"":
-		_done = true
-		_cleanup_pending = true
-		print(""[LoadingBarBoot] mod disabled or unsubscribed — bar suppressed, cleanup deferred"")
-	else:
-		_build_ui()
-		_skip_log_history()
-		print(""[LoadingBarBoot] splash ready at frame "", Engine.get_frames_drawn())
 
 # ---------------- 自检与自清理 ----------------
 
