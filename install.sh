@@ -8,6 +8,7 @@ GAME_MODS="$GAME_DIR/SlayTheSpire2.app/Contents/MacOS/mods/ItsLoading"
 
 mkdir -p "$GAME_MODS"
 cp src/ItsLoading/bin/Release/net9.0/ItsLoading.dll "$GAME_MODS/"
+cp src/ItsLoading/bin/Release/net9.0/ItsLoading.pck "$GAME_MODS/"
 cp src/ItsLoadingCompat/bin/Release/net9.0/ItsLoadingCompat.dll "$GAME_MODS/"
 cp src/ItsLoading/ItsLoading.json "$GAME_MODS/"
 cp src/ItsLoading/mod_image.png "$GAME_MODS/"

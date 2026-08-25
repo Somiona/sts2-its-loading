@@ -20,5 +20,11 @@ fi
 dotnet build src/ItsLoading/ItsLoading.csproj -c Release
 dotnet build src/ItsLoadingCompat/ItsLoadingCompat.csproj -c Release
 
+# 本地化 pck(v3 格式,游戏的 4.5.1 fork 实测可加载;勿用 Godot 4.7 PCKPacker——它写 v4 被拒)
+OUT="src/ItsLoading/bin/Release/net9.0"
+python3 tools/build_pck.py "$OUT/ItsLoading.pck" \
+  "ItsLoading/localization/zhs/settings_ui.json" src/ItsLoading/localization/zhs/settings_ui.json \
+  "ItsLoading/localization/eng/settings_ui.json" src/ItsLoading/localization/eng/settings_ui.json
+
 echo
 echo "dll => src/ItsLoading/bin/Release/net9.0/ItsLoading.dll"
