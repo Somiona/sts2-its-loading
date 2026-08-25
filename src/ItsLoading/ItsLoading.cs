@@ -259,14 +259,16 @@ public static class ItsLoading
                     Recorder.PhaseSpans.Add(new Api.LoadSpan(
                         "prelude(Steam+工坊+本地扫描)", Api.LoadPhase.Prelude,
                         Recorder.BootAnchorMsec, nowMsec - Recorder.BootAnchorMsec, ""));
-                    // 引擎 C++ 初始化(frame 0 之前)也是真实耗时,显式记录
                     Recorder.PhaseSpans.Add(new Api.LoadSpan(
-                        "engine_init(C++ 初始化,黑屏+忙碌光标)", Api.LoadPhase.Prelude,
-                        0, Recorder.BootAnchorMsec, "frame 0 之前,mod 无法观测"));
+                        "engine_init(C++ 初始化)", Api.LoadPhase.Prelude,
+                        0, Recorder.BootAnchorMsec, ""));
                 }
             }
-            boot.Call("takeover");
-            Log.Warn("[ItsLoading] boot splash handed over to mod bar");
+            // 不隐藏 gd splash!让 C# 条(层级 999)直接叠在 gd 条(层级 998)上面。
+            // 隐藏 CanvasLayer 会触发渲染状态变更,在无新帧提交时可能被 MoltenVK 清屏 —— 这就是黑屏间隙的来源。
+            // gd 的 _process(shimmer)继续跑但不被看见;延迟到 C# 条移除时一并清理。
+            _bootSplashNode = boot;
+            Log.Warn("[ItsLoading] boot splash kept visible under mod bar (no takeover)");
         }
         else
         {
@@ -632,6 +634,7 @@ func takeover() -> void:
     // 调用、WaterfallConfig 类型永不加载(JIT 按方法惰性解析),不影响本 mod。
 
     private static CanvasLayer _waterfallLayer;
+    private static Godot.Node? _bootSplashNode; // 延迟清理的 gd splash 引用
 
     /// <summary>
     /// 仅在 BaseLib 已加载时被调用。BaseLib 类型只存在于独立的兼容垫片
@@ -1122,6 +1125,7 @@ func takeover() -> void:
         {
             _barDead = true;
             _layer?.QueueFree();
+            _bootSplashNode?.Call("takeover"); // C# 条移除时才隐藏 gd splash
         });
     }
 }

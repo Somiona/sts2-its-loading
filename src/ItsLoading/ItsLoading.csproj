@@ -2,12 +2,15 @@
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
-    <Version>0.13.1</Version>
+    <Version>0.13.2</Version>
     <AssemblyName>ItsLoading</AssemblyName>
     <RootNamespace>ItsLoading</RootNamespace>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
+    <!-- ReadyToRun:预编译原生码,减少首次 JIT 的黑屏时间;跨平台安全(不匹配时回退 JIT) -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <RuntimeIdentifier>osx-arm64</RuntimeIdentifier>
     <!-- 进度条 UI 阶段再换 Godot.NET.Sdk(需要源生成器);当前纯静态类无需 -->
   </PropertyGroup>
 
