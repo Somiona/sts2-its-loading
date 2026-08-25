@@ -639,13 +639,14 @@ func takeover() -> void:
                 Log.Warn("[ItsLoading] %ModdingButton not found in settings screen");
                 return;
             }
-            // 已加过(设置界面复用时防重复)
-            foreach (var child in modBtn.GetParent().GetChildren())
-            {
-                if (child.Name == "ItsLoadingWaterfallBtn") return;
-            }
 
-            // 从 Modding 按钮向上找最近的布局容器,把自己交给引擎排版
+            // 原生样式 = Duplicate 游戏自己的按钮(皮肤/悬停/音效/手柄全套),
+            // 点击行为由设置界面订阅 Released 信号挂接(逆向 NSettingsScreen._Ready 确认),
+            // 复制体无人订阅 → 白纸,我们用同款信号接瀑布图。
+            var dup = (Control)modBtn.Duplicate();
+            dup.Name = "ItsLoadingWaterfallBtn";
+
+            // 从 Modding 按钮向上找最近的布局容器,交给引擎排版
             // (直接塞进非容器父节点 = 绝对坐标 0,0 → 盖住原按钮,v0.9.0 的教训)
             Container list = null;
             var chain = new System.Text.StringBuilder();
@@ -663,24 +664,29 @@ func takeover() -> void:
                 Log.Warn("[ItsLoading] no layout container above ModdingButton: " + chain);
                 return;
             }
+            // 已加过(设置界面复用时防重复)
+            foreach (var child in list.GetChildren())
+            {
+                if (child.Name == dup.Name) { dup.QueueFree(); return; }
+            }
 
-            var btn = new Button { Text = "启动瀑布图", Name = "ItsLoadingWaterfallBtn" };
-            btn.AddThemeFontSizeOverride("font_size", 16);
-            btn.AddThemeColorOverride("font_color", Colors.White);
-            btn.Pressed += ShowWaterfall;
-            list.AddChild(btn);
-            // 紧跟 Modding 按钮所在行之后
             int anchorIdx = modBtn.GetIndex();
             if (modBtn.GetParent() != list)
             {
-                // modBtn 在子容器里:找到那个子容器在 list 中的位置
-                for (Node p = modBtn.GetParent(); p != null && p.GetParent() != list; p = p.GetParent()) { }
                 Node row = modBtn.GetParent();
                 while (row.GetParent() != list && row.GetParent() != null) row = row.GetParent();
                 anchorIdx = row.GetIndex();
             }
-            list.MoveChild(btn, Math.Min(anchorIdx + 1, list.GetChildCount() - 1));
-            Log.Warn($"[ItsLoading] waterfall button added into {list.Name}({list.GetType().Name}) " +
+            list.AddChild(dup);
+            list.MoveChild(dup, Math.Min(anchorIdx + 1, list.GetChildCount() - 1));
+
+            // 入树后 _Ready 已把标签设回"模组",覆盖为我们的文案(MegaLabel 接受纯字符串)
+            var label = dup.GetNodeOrNull<MegaCrit.Sts2.addons.mega_text.MegaLabel>("Label");
+            label?.SetTextAutoSize("启动瀑布图");
+
+            // 与游戏同款信号接行为(NClickableControl.SignalName.Released)
+            dup.Connect("Released", Callable.From(ShowWaterfall));
+            Log.Warn($"[ItsLoading] native waterfall button added into {list.Name}({list.GetType().Name}) " +
                      $"@index {anchorIdx + 1}; ancestors: {chain}");
         });
     }
