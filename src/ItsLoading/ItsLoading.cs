@@ -604,48 +604,42 @@ func takeover() -> void:
                  $"{loadedBeforeUs} mods loaded before us) — full timing coverage from next boot");
     }
 
-    // ---------------------------------------------------------------- 瀑布图入口(ModConfig 软依赖)
+    // ---------------------------------------------------------------- 瀑布图入口(BaseLib 软依赖)
     //
-    // 不再自制设置界面按钮(原生 Duplicate 方案与场景唯一名系统冲突,见 v0.9.x 教训)。
-    // 改为在 ModConfig 加载完成时(TryLoadMod postfix 天然逐 mod 触发)反射注册其
-    // 配置条目:零编译期依赖、manifest 零改动、ModConfig 缺失时静默跳过。
+    // BaseLib 的配置体系:SimpleModConfig 子类 + [ConfigButton] 方法;
+    // 行标签 = 方法名(本地化缺失时原文回退,中文方法名即中文标签)。
+    // 软依赖实现:编译期引用 refs/BaseLib.dll(不入库),注册调用放在
+    // RegisterWaterfallInBaseLib 这一个方法里 —— BaseLib 缺席时它永不被
+    // 调用、WaterfallConfig 类型永不加载(JIT 按方法惰性解析),不影响本 mod。
 
     private static CanvasLayer _waterfallLayer;
 
-    private static void RegisterWaterfallInModConfig(Mod mod)
+    /// <summary>
+    /// 仅在 BaseLib 已加载时被调用。BaseLib 类型只存在于独立的兼容垫片
+    /// ItsLoadingCompat.dll 中 —— 主 dll 绝不引用 BaseLib(否则 ModManager 的
+    /// assembly.GetTypes() 会在 BaseLib 未加载时抛 ReflectionTypeLoadException,
+    /// v0.11.0 的翻车根源),垫片在此刻手动 LoadFrom,类型解析必然成功。
+    /// </summary>
+    private static void RegisterWaterfallInBaseLib()
     {
-        var asm = mod.assembly;
-        if (asm == null)
+        string shimPath = Path.Combine(
+            Path.GetDirectoryName(typeof(ItsLoading).Assembly.Location) ?? ".", "ItsLoadingCompat.dll");
+        if (!File.Exists(shimPath))
         {
-            Log.Warn("[ItsLoading] ModConfig assembly unavailable — waterfall entry skipped");
+            Log.Warn("[ItsLoading] ItsLoadingCompat.dll not found — BaseLib entry skipped");
             return;
         }
-        var api = asm.GetType("ModConfig.ModConfigApi");
-        var entryType = asm.GetType("ModConfig.ConfigEntry");
-        var configEnum = asm.GetType("ModConfig.ConfigType");
-        if (api == null || entryType == null || configEnum == null)
-        {
-            Log.Warn("[ItsLoading] ModConfig API types not found — waterfall entry skipped");
-            return;
-        }
+        var shim = Assembly.LoadFrom(shimPath);
+        shim.GetType("ItsLoadingCompat.Entry")?
+            .GetMethod("Register")?
+            .Invoke(null, new object[] { "ItsLoading" });
+        Log.Warn("[ItsLoading] waterfall entry registered in BaseLib (via shim)");
+    }
 
-        object entry = System.Activator.CreateInstance(entryType)!;
-        void Set(string prop, object value) =>
-            entryType.GetProperty(prop)?.SetValue(entry, value);
-        Set("Key", "waterfall");
-        Set("Label", "启动瀑布图");
-        Set("Description", "打开本次启动的耗时瀑布图(各阶段/各 mod 真实时长)");
-        Set("Type", System.Enum.Parse(configEnum, "Button"));
-        Set("ButtonText", "查看");
-        Set("OnChanged", new Action<object>(_ => ShowWaterfall()));
-
-        var entries = System.Array.CreateInstance(entryType, 1);
-        entries.SetValue(entry, 0);
-        api.GetMethod("Register", new[]
-        {
-            typeof(string), typeof(string), entries.GetType(),
-        })?.Invoke(null, new object[] { "ItsLoading", "不再干等 · It's Loading", entries });
-        Log.Warn("[ItsLoading] waterfall entry registered in ModConfig");
+    /// <summary>兼容垫片回调入口。</summary>
+    public static class CompatHooks
+    {
+        public static void OpenWaterfall() => ShowWaterfall();
     }
 
     private static void ShowWaterfall()
@@ -850,10 +844,11 @@ func takeover() -> void:
             (nowTicks - Recorder.ModStartTicks) * Recorder.SwTicksToMs,
             mod.state.ToString()));
 
-        // ModConfig 加载完成的瞬间反射注册瀑布图入口(软依赖:缺失时静默跳过)
-        if (id == "ModConfig" && mod.state == ModLoadState.Loaded)
+        // BaseLib 加载完成的瞬间注册瀑布图入口(软依赖:编译期引用 + JIT 方法级隔离,
+        // BaseLib 缺席时 RegisterWaterfallInBaseLib 永不被调用、类型永不加载)
+        if (id == "BaseLib" && mod.state == ModLoadState.Loaded)
         {
-            Run("register in ModConfig", () => RegisterWaterfallInModConfig(mod));
+            Run("register in BaseLib", RegisterWaterfallInBaseLib);
         }
 
         float frac = 0.25f + 0.35f * (_count / (float)_total);

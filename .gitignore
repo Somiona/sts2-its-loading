@@ -9,6 +9,7 @@ agents/
 .cursor/
 
 # 构建产物
+src/*/refs/
 src/*/bin/
 src/*/obj/
 
