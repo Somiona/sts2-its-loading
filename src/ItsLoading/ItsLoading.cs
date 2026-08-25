@@ -55,6 +55,8 @@ public static class ItsLoading
         // 顺序关键:先建好条并强制绘制一帧,再隐藏 autoload splash,保证无黑屏间隙
         Run("build bar", BuildBar);
         Run("boot splash handoff", HandoffFromBootSplash);
+        // 原子交接:gd 已隐藏、C# 条已挂载,此刻出帧 = 一帧内完成条与条的切换
+        Run("first paint", () => RenderingServer.ForceDraw());
         Run("patch loader", PatchLoader);
         Run("patch boot phases", PatchBootPhases);
         Run("patch mod info icon", PatchModInfoIcon);
@@ -175,8 +177,8 @@ public static class ItsLoading
         }
 
         // 必须直接 AddChild:同步突发期间 deferred 队列永远不会执行
+        // 注意:这里不 ForceDraw —— 画帧时机在隐藏 gd splash 之后,保证交接原子性
         tree.Root.AddChild(_layer);
-        RenderingServer.ForceDraw();
         Log.Warn($"[ItsLoading] bar attached (viewport {vs.X}x{vs.Y})");
     }
 
@@ -255,8 +257,12 @@ public static class ItsLoading
                 if (Recorder.BootAnchorMsec >= 0)
                 {
                     Recorder.PhaseSpans.Add(new Api.LoadSpan(
-                        "prelude(引擎启动+工坊读取)", Api.LoadPhase.Prelude,
-                        0, nowMsec - Recorder.BootAnchorMsec, ""));
+                        "prelude(Steam+工坊+本地扫描)", Api.LoadPhase.Prelude,
+                        Recorder.BootAnchorMsec, nowMsec - Recorder.BootAnchorMsec, ""));
+                    // 引擎 C++ 初始化(frame 0 之前)也是真实耗时,显式记录
+                    Recorder.PhaseSpans.Add(new Api.LoadSpan(
+                        "engine_init(C++ 初始化,黑屏+忙碌光标)", Api.LoadPhase.Prelude,
+                        0, Recorder.BootAnchorMsec, "frame 0 之前,mod 无法观测"));
                 }
             }
             boot.Call("takeover");
