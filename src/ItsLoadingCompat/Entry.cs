@@ -25,6 +25,6 @@ namespace ItsLoading
     public sealed class WaterfallConfig : SimpleModConfig
     {
         [ConfigButton("View")]
-        public void OpenWaterfall() => global::ItsLoading.ItsLoading.CompatHooks.OpenWaterfall();
+        public void OpenWaterfall() => global::ItsLoading.WaterfallViewer.CompatHooks.OpenWaterfall();
     }
 }
