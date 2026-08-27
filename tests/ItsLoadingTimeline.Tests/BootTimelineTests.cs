@@ -1,0 +1,317 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using ItsLoading;
+using Xunit;
+
+// 启动时间线数学的离线回归:这里每一条断言对应历史上真出过 bug 的区域——
+// mod 段公式、步骤分数与相邻差分、会话插值与空会话(todo#5)、锚点兜底(todo#6)。
+
+public sealed class Spy : List<(float Frac, string Step, string Detail, bool Force)>
+{
+    public Action<float, string, string, bool> AsPresenter() =>
+        (f, s, d, fd) => Add((f, s, d, fd));
+
+    public (float Frac, string Step, string Detail, bool Force) Last => this[^1];
+}
+
+public sealed class ScriptedClock
+{
+    public long EngineMsec;
+    public long Ticks;
+
+    internal BootTimeline MakeTimeline(Spy spy) =>
+        new(() => EngineMsec, () => Ticks) { Presenter = spy.AsPresenter() };
+
+    /// <summary>毫秒 → Stopwatch ticks(按本机 Frequency,与生产同一换算)。</summary>
+    public long MsToTicks(double ms) => (long)(ms / 1000.0 * Stopwatch.Frequency);
+
+    public void AdvanceMs(double ms)
+    {
+        EngineMsec += (long)ms;
+        Ticks += MsToTicks(ms);
+    }
+}
+
+public class BootTimelineTests
+{
+    private static Func<int, string> Text(string prefix) => n => $"{prefix}{n}";
+
+    [Fact]
+    public void BeginMods_presents_quarter_with_empty_detail()
+    {
+        var clock = new ScriptedClock();
+        var spy = new Spy();
+        clock.MakeTimeline(spy).BeginMods(8, "Loading mods 1/8");
+
+        var p = Assert.Single(spy);
+        Assert.Equal(0.25f, p.Frac);
+        Assert.Equal("Loading mods 1/8", p.Step);
+        Assert.Equal("", p.Detail);
+        Assert.True(p.Force);
+    }
+
+    [Fact]
+    public void BeginMods_clamps_total_to_one()
+    {
+        var clock = new ScriptedClock();
+        var tl = clock.MakeTimeline(new Spy());
+        tl.BeginMods(0, "x");
+        Assert.Equal(1, tl.Total);
+    }
+
+    [Fact]
+    public void ModStarted_presents_same_fraction_without_touching_labels()
+    {
+        var clock = new ScriptedClock();
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        tl.BeginMods(4, "mods");
+
+        tl.ModStarted();
+
+        Assert.Equal(0.25f, spy.Last.Frac);
+        Assert.Null(spy.Last.Step);   // 不动文案,只触发补画
+        Assert.Null(spy.Last.Detail);
+        Assert.True(spy.Last.Force);
+        Assert.Equal(1, tl.PrefixCalls);
+    }
+
+    [Fact]
+    public void ModLoaded_advances_formula_and_completes_at_sixty_percent()
+    {
+        var clock = new ScriptedClock { EngineMsec = 10_000 };
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        tl.BeginMods(4, "mods"); // 自身=1,再装 3 个到 4
+
+        Assert.Equal(2, tl.ModLoaded("A", "Loaded", Text("A-"), "dA", "done", n => $"fin{n}"));
+        Assert.Equal(0.25f + 0.35f * (2 / 4f), spy.Last.Frac); // 0.425
+        Assert.Equal("A-2", spy.Last.Step); // 计数文案由时间线注入 n
+        Assert.Equal("dA", spy.Last.Detail);
+
+        Assert.Equal(3, tl.ModLoaded("B", "Loaded", Text("B-"), "dB", "done", n => $"fin{n}"));
+        Assert.Equal(0.25f + 0.35f * (3 / 4f), spy.Last.Frac);
+
+        Assert.Equal(4, tl.ModLoaded("C", "Loaded", Text("C-"), "dC", "done", n => $"fin{n}"));
+        Assert.True(tl.ModsDone);
+        Assert.Equal(0.60f, spy.Last.Frac);            // 完成呈现
+        Assert.Equal("done", spy.Last.Step);
+        Assert.Equal("fin4", spy.Last.Detail);          // 完成文案带计数
+
+        var phase = Assert.Single(tl.PhaseSpans);
+        Assert.Equal("phase.mod_load", phase.Id);
+        Assert.Equal("4 mods", phase.Detail);
+    }
+
+    [Fact]
+    public void ModLoaded_records_span_on_engine_timeline()
+    {
+        var clock = new ScriptedClock { EngineMsec = 10_000 };
+        var tl = clock.MakeTimeline(new Spy());
+        tl.BeginMods(2, "m");
+        clock.Ticks = clock.MsToTicks(1_000);           // prefix 时刻(ticks 1000ms)
+        tl.ModStarted();
+        clock.Ticks = clock.MsToTicks(1_300);           // postfix 时刻
+        tl.ModLoaded("A", "Loaded", Text("x"), "d", "done", n => "f");
+
+        var span = Assert.Single(tl.ModSpans);
+        Assert.Equal("A", span.Id);
+        Assert.Equal("Loaded", span.Detail);
+        Assert.Equal(300.0, span.DurationMs, 1);        // prefix→postfix 真实区间
+        // 引擎毫秒起点 = 偏移(构造对表于 ticks=0 ↔ engine=10000) + 1000ms
+        Assert.Equal(11_000.0, span.StartMs, 1);
+    }
+
+    [Fact]
+    public void StepStarted_uses_fraction_table_and_closes_previous_span_by_differencing()
+    {
+        var clock = new ScriptedClock { EngineMsec = 10_000 };
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+
+        clock.Ticks = clock.MsToTicks(2_000);
+        tl.StepStarted("step.atlas", "图集加载", "+2000ms");
+        Assert.Equal(0.615f, spy.Last.Frac);
+        var first = Assert.Single(tl.StepSpans);
+        Assert.Equal(0, first.DurationMs);              // 开启时未知时长
+
+        clock.Ticks = clock.MsToTicks(2_050);
+        tl.StepStarted("step.loc", "本地化初始化", "+2050ms");
+        Assert.Equal(0.625f, spy.Last.Frac);
+        Assert.Equal(2, tl.StepSpans.Count);
+        Assert.Equal(50.0, tl.StepSpans[0].DurationMs, 1); // 相邻差分收尾
+        Assert.Equal(0, tl.StepSpans[1].DurationMs);
+    }
+
+    [Fact]
+    public void StepStarted_ignores_unknown_keys()
+    {
+        var clock = new ScriptedClock();
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        tl.BeginMods(2, "m");
+
+        tl.StepStarted("step.nope", "x", "y");
+
+        Assert.Single(spy);                              // 只有 BeginMods 那次
+        Assert.Empty(tl.StepSpans);
+    }
+
+    [Fact]
+    public void SessionAdvanced_interpolates_range_and_records_completion()
+    {
+        var clock = new ScriptedClock { EngineMsec = 10_000 };
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        var session = new object();
+
+        Assert.True(tl.TracksSession("IntroLogo"));
+        clock.Ticks = clock.MsToTicks(3_000);
+        tl.SessionAdvanced(session, "IntroLogo", 5, 5, "assets", t => $"{5}/{t}");
+        Assert.Equal(0.66f + (0.70f - 0.66f) * 0.5f, spy.Last.Frac, 5); // 中点 0.68
+        Assert.Equal("5/10", spy.Last.Detail);
+        Assert.False(spy.Last.Force);                    // 会话事件不强制出帧
+
+        clock.Ticks = clock.MsToTicks(3_400);
+        tl.SessionAdvanced(session, "IntroLogo", 10, 0, "assets", t => $"{10}/{t}");
+        Assert.Equal(0.70f, spy.Last.Frac, 5);
+        var span = Assert.Single(tl.SessionSpans);
+        Assert.Equal("IntroLogo", span.Id);
+        Assert.Equal(400.0, span.DurationMs, 1);
+        Assert.Equal("10/10", span.Detail);
+    }
+
+    [Fact]
+    public void SessionAdvanced_empty_session_is_complete_not_NaN()
+    {
+        var clock = new ScriptedClock();
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        tl.BeginMods(2, "m");
+
+        tl.SessionAdvanced(new object(), "IntroLogo", 0, 0, "a", t => $"0/{t}");
+
+        Assert.Equal(0.70f, spy.Last.Frac, 5);           // todo#5:0/0 按已完成,不产生 NaN
+        Assert.Empty(tl.SessionSpans);                   // Total=0 不记 span
+    }
+
+    [Fact]
+    public void SessionAdvanced_ignores_untracked_sessions_and_postfreeze_events()
+    {
+        var clock = new ScriptedClock();
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        tl.BeginMods(2, "m");
+        int before = spy.Count;
+
+        Assert.False(tl.TracksSession("SomeRoomLoad"));  // 游戏内会话:钩子连反射读都省了
+        tl.SessionAdvanced(new object(), "SomeRoomLoad", 1, 1, "a", t => "x");
+        Assert.Equal(before, spy.Count);
+
+        tl.MenuReady("done", "123ms");
+        Assert.False(tl.TracksSession("IntroLogo"));     // 冻结后
+        tl.SessionAdvanced(new object(), "IntroLogo", 1, 0, "a", t => "x");
+        Assert.Equal(before + 1, spy.Count);             // 只有 MenuReady 那次
+    }
+
+    [Fact]
+    public void SetBootAnchor_records_prelude_and_engine_init_spans()
+    {
+        var clock = new ScriptedClock { EngineMsec = 5_000 };
+        var tl = clock.MakeTimeline(new Spy());
+
+        tl.SetBootAnchor(1_000);
+
+        Assert.Equal(2, tl.PhaseSpans.Count);
+        Assert.Equal("phase.prelude", tl.PhaseSpans[0].Id);
+        Assert.Equal(1_000.0, tl.PhaseSpans[0].StartMs, 1);
+        Assert.Equal(4_000.0, tl.PhaseSpans[0].DurationMs, 1);
+        Assert.Equal("phase.engine_init", tl.PhaseSpans[1].Id);
+        Assert.Equal(0.0, tl.PhaseSpans[1].StartMs, 1);
+        Assert.Equal(1_000.0, tl.PhaseSpans[1].DurationMs, 1);
+    }
+
+    [Fact]
+    public void MenuReady_without_anchor_falls_back_to_engine_now()
+    {
+        var clock = new ScriptedClock { EngineMsec = 9_123 };
+        var tl = clock.MakeTimeline(new Spy());
+
+        tl.MenuReady("done", "x");
+
+        Assert.Equal(9_123.0, tl.TotalBootMs, 1);        // todo#6:不再 -1
+        Assert.True(tl.Frozen);
+    }
+
+    [Fact]
+    public void MenuReady_with_anchor_measures_from_boot()
+    {
+        var clock = new ScriptedClock { EngineMsec = 12_000 };
+        var tl = clock.MakeTimeline(new Spy());
+        tl.SetBootAnchor(2_000);
+
+        tl.MenuReady("done", "x");
+
+        Assert.Equal(10_000.0, tl.TotalBootMs, 1);
+    }
+
+    [Fact]
+    public void MenuReady_closes_pending_step_span_and_presents_one()
+    {
+        var clock = new ScriptedClock { EngineMsec = 10_000 };
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        clock.Ticks = clock.MsToTicks(2_000);
+        tl.StepStarted("step.atlas", "a", "d");
+
+        clock.Ticks = clock.MsToTicks(2_080);
+        tl.MenuReady("Ready", "80ms");
+
+        Assert.Equal(1.0f, spy.Last.Frac);
+        Assert.Equal("Ready", spy.Last.Step);
+        Assert.Equal(80.0, tl.StepSpans[0].DurationMs, 1); // 末步骤收尾
+    }
+
+    [Fact]
+    public void Waypoint_dedups_main_menu_and_uses_table_fractions()
+    {
+        var clock = new ScriptedClock();
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+
+        tl.Waypoint(BootWaypoint.Logo, "logo", "");
+        Assert.Equal(0.82f, spy.Last.Frac);
+        tl.Waypoint(BootWaypoint.MenuLoad, "menu", "");
+        Assert.Equal(0.88f, spy.Last.Frac);
+        tl.Waypoint(BootWaypoint.MainMenu, "opening", "+1ms");
+        tl.Waypoint(BootWaypoint.MainMenu, "opening", "+2ms"); // 二次被去重
+
+        Assert.Equal(3, spy.Count);
+        Assert.Equal(0.66f, spy.Last.Frac);
+    }
+
+    [Fact]
+    public void BootSummary_lists_slowest_mods_and_null_when_empty()
+    {
+        var clock = new ScriptedClock { EngineMsec = 10_000 };
+        var tl = clock.MakeTimeline(new Spy());
+        Assert.Null(tl.BootSummary());
+
+        tl.BeginMods(2, "m");
+        clock.Ticks = clock.MsToTicks(100);
+        tl.ModStarted();
+        clock.Ticks = clock.MsToTicks(400);
+        tl.ModLoaded("Slow", "Loaded", Text("x"), "d", "done", n => "f");
+        clock.Ticks = clock.MsToTicks(500);
+        tl.ModStarted();
+        clock.Ticks = clock.MsToTicks(510);
+        tl.ModLoaded("Fast", "Loaded", Text("x"), "d", "done", n => "f");
+
+        string s = tl.BootSummary();
+        Assert.StartsWith("[ItsLoading] boot ", s);
+        Assert.Contains("slowest mods:", s);
+        Assert.Contains("Slow=300ms Fast=10ms", s);
+        Assert.Contains("prefix=2 postfix=2", s);
+    }
+}

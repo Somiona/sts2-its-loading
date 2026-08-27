@@ -67,21 +67,11 @@ internal static class BootSplash
         var boot = ((SceneTree)Engine.GetMainLoop()).Root.GetNodeOrNull(AutoloadName);
         if (boot != null)
         {
-            // 引擎启动锚点(gd frame 0)+ 前奏阶段(引擎启动+工坊读取)时长
+            // 引擎启动锚点(gd frame 0)+ 前奏阶段 spans:写入启动时间线(单一写缝)
             Variant anchor = boot.Get("boot_start_msec");
             if (anchor.VariantType == Variant.Type.Int)
             {
-                Recorder.BootAnchorMsec = anchor.AsInt64();
-                long nowMsec = (long)Time.GetTicksMsec();
-                if (Recorder.BootAnchorMsec >= 0)
-                {
-                    Recorder.PhaseSpans.Add(new Api.LoadSpan(
-                        "phase.prelude", Api.LoadPhase.Prelude,
-                        Recorder.BootAnchorMsec, nowMsec - Recorder.BootAnchorMsec, ""));
-                    Recorder.PhaseSpans.Add(new Api.LoadSpan(
-                        "phase.engine_init", Api.LoadPhase.Prelude,
-                        0, Recorder.BootAnchorMsec, ""));
-                }
+                ItsLoading.Timeline?.SetBootAnchor(anchor.AsInt64());
             }
             // 不隐藏 gd splash!让 C# 条(层级 999)直接叠在 gd 条(层级 998)上面。
             // 隐藏 CanvasLayer 会触发渲染状态变更,在无新帧提交时可能被 MoltenVK 清屏 —— 这就是黑屏间隙的来源。

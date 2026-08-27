@@ -12,6 +12,8 @@ agents/
 src/*/refs/
 src/*/bin/
 src/*/obj/
+tests/*/bin/
+tests/*/obj/
 
 # 系统
 .DS_Store

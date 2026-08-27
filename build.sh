@@ -20,6 +20,9 @@ fi
 # i18n 门禁:eng 缺使用中的键 = 构建失败(set -e 生效);其他语言缺键出警告
 python3 tools/check_i18n.py
 
+# 时间线数学回归(纯 BCL,离线跑;本机仅 .NET 10 运行时,故测试工程 target net10.0)
+dotnet test tests/ItsLoadingTimeline.Tests/ItsLoadingTimeline.Tests.csproj -c Release
+
 dotnet build src/ItsLoading/ItsLoading.csproj -c Release
 dotnet build src/ItsLoadingCompat/ItsLoadingCompat.csproj -c Release
 

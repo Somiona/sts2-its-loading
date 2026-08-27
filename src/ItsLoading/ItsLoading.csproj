@@ -19,6 +19,11 @@
   <Import Project="Sts2PathDiscovery.props"/>
 
   <ItemGroup>
+    <!-- 测试工程访问 internal(BootTimeline 写缝) -->
+    <InternalsVisibleTo Include="ItsLoadingTimeline.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- 引用直达本机游戏目录,仓库不含任何游戏侧二进制 -->
     <Reference Include="GodotSharp">
       <HintPath>$(Sts2DataDir)/GodotSharp.dll</HintPath>
