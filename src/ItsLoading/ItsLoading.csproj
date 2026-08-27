@@ -2,15 +2,16 @@
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
-    <Version>0.13.2</Version>
+    <Version>0.14.0</Version>
     <AssemblyName>ItsLoading</AssemblyName>
     <RootNamespace>ItsLoading</RootNamespace>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <!-- ReadyToRun:预编译原生码,减少首次 JIT 的黑屏时间;跨平台安全(不匹配时回退 JIT) -->
+    <!-- ReadyToRun:仅 dotnet publish -r <rid> 时生效(build 不做 R2R)。v0.13.2 试验结论:JIT 不是瓶颈。
+         勿在 csproj 硬编码 RuntimeIdentifier——它只会把 build 输出挪进 RID 子目录,而 build/install
+         脚本与跨平台构建(Windows/Linux)都假定单一 net9.0/ 输出路径(v0.13.2 曾因此装旧 dll,见 todo#2) -->
     <PublishReadyToRun>true</PublishReadyToRun>
-    <RuntimeIdentifier>osx-arm64</RuntimeIdentifier>
     <!-- 进度条 UI 阶段再换 Godot.NET.Sdk(需要源生成器);当前纯静态类无需 -->
   </PropertyGroup>
 

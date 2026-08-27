@@ -17,7 +17,7 @@ namespace ItsLoading;
 ///   1. 不用 Container/CenterContainer —— 其布局走 deferred 排序,同步突发期间不执行(内容挤在 0×0)
 ///   2. 全部节点手动定位 —— v0.2 底部条验证过的唯一可靠模式
 ///   3. gd 与 C# 渲染完全一致的样式 —— frame 0 接管无视觉跳变
-///   4. 单一进度刻度 0→1:工坊读取 0-0.25 / mod 加载 0.25-0.60 / Essential 0.60-0.92 / 菜单 0.92-1.0
+///   4. 单一进度刻度 0→1:工坊读取 0-0.25 / mod 加载 0.25-0.60 / Essential 0.60-0.88 / 菜单就绪 0.88-1.0(启动边界 = 菜单可交互,延迟资产不进条)
 /// </summary>
 [ModInitializer("Init")]
 public static class ItsLoading
@@ -55,13 +55,22 @@ public static class ItsLoading
         // 顺序关键:先建好条并强制绘制一帧,再隐藏 autoload splash,保证无黑屏间隙
         Run("build bar", BuildBar);
         Run("boot splash handoff", HandoffFromBootSplash);
-        // 原子交接:gd 已隐藏、C# 条已挂载,此刻出帧 = 一帧内完成条与条的切换
-        Run("first paint", () => RenderingServer.ForceDraw());
+        // 原子交接:此刻出帧 = 一帧内完成条与条的切换。
+        // 连画 3 次:主线程刚进入同步突发时,首次提交可能被 MoltenVK 丢弃
+        // (实测 mods 1-4 的单次 ForceDraw 不上屏、约 mod 5 才恢复),冗余提交
+        // 让有效帧尽早出现(2026-08-27)。
+        Run("first paint", () =>
+        {
+            for (int i = 0; i < 3; i++) RenderingServer.ForceDraw();
+        });
         Run("patch loader", PatchLoader);
         Run("patch boot phases", PatchBootPhases);
         Run("patch mod info icon", PatchModInfoIcon);
         Log.Warn($"[ItsLoading] watching {_total} mods");
-        SetProgress(0.25f, $"模组加载 1/{_total}", "", true);
+        // todo#9:走 I18n(此前硬编码中文,英文玩家从首帧 ForceDraw 起就看中文;
+        // _total==1 时中文停留整条进度条生命周期)
+        SetProgress(0.25f,
+            I18n.T("bar.mods", new() { ["n"] = "1", ["t"] = _total.ToString() }), "", true);
     }
 
     // ---------------------------------------------------------------- mod 菜单图标
@@ -123,6 +132,19 @@ public static class ItsLoading
 
     // ================================================================ UI(全手动定位,无 Container)
 
+    // ---- 条样式共享常量(todo#10:gd splash 模板与 C# 条的唯一真源)----
+    // 颜色是最易漂移的样式类(几何漂移肉眼立见,颜色微漂正是一次漏网),
+    // 因此颜色由这里的常量插值进 BootSplashGdTemplate;几何常量仍两侧成对,
+    // 改布局时需手动同步(见模板内注释)。
+    private static readonly Color BarTrackColor = new(1f, 1f, 1f, 0.15f);        // 轨道
+    private static readonly Color BarDetailColor = new(0.62f, 0.64f, 0.70f, 1f); // 细节文字
+    private static readonly Color BarFillColor = new(0.2f, 0.85f, 0.9f, 1f);     // 填充
+
+    /// <summary>Color → GDScript 字面量(不变文化,防区域设置把小数点变逗号)。</summary>
+    private static string GdColor(Color c) => string.Create(
+        System.Globalization.CultureInfo.InvariantCulture,
+        $"Color({c.R:0.####}, {c.G:0.####}, {c.B:0.####}, {c.A:0.####})");
+
     private static void BuildBar()
     {
         var tree = (SceneTree)Engine.GetMainLoop();
@@ -130,11 +152,19 @@ public static class ItsLoading
 
         _layer = new CanvasLayer { Layer = 999 };
 
-        // 无垫底:仅作定位用的透明容器(不渲染任何背景)
+        // 定位容器 + 不透明黑垫底(上下各溢出 2px 盖严):
+        // v0.13.x 双条并存期间,gd 条(998,冻结在「52/52」)一直在本条(999)下面渲染,
+        // 两条都是透明设计时文字会交叠(用户可见的"gd 残留")。C# 条一旦开始出帧,
+        // 同几何黑底即完全遮住 gd 条——交接时刻无论早晚都无缝(2026-08-27)。
         var strip = new Control();
         strip.SetAnchorsPreset(Control.LayoutPreset.BottomWide);
         strip.OffsetTop = -64f;
         _layer.AddChild(strip);
+        var backing = new ColorRect { Color = new Color(0f, 0f, 0f, 1f) };
+        backing.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        backing.OffsetTop = -2f;
+        backing.OffsetBottom = 2f;
+        strip.AddChild(backing);
 
         _stepLabel = new Label();
         _stepLabel.Position = new Vector2(24f, 8f);
@@ -146,7 +176,7 @@ public static class ItsLoading
         _detailLabel = new Label();
         _detailLabel.Position = new Vector2(24f, 36f);
         _detailLabel.AddThemeFontSizeOverride("font_size", 14);
-        _detailLabel.AddThemeColorOverride("font_color", new Color(0.62f, 0.64f, 0.70f, 1f));
+        _detailLabel.AddThemeColorOverride("font_color", BarDetailColor);
         _detailLabel.Text = "";
         strip.AddChild(_detailLabel);
 
@@ -154,13 +184,13 @@ public static class ItsLoading
         var track = new ColorRect();
         track.Position = new Vector2(24f, 56f);
         track.Size = new Vector2(_barFullWidth, 5f);
-        track.Color = new Color(1f, 1f, 1f, 0.15f);
+        track.Color = BarTrackColor;
         strip.AddChild(track);
 
         _fill = new ColorRect();
         _fill.Position = Vector2.Zero;
         _fill.Size = new Vector2(0f, 5f);
-        _fill.Color = new Color(0.2f, 0.85f, 0.9f, 1f);
+        _fill.Color = BarFillColor;
         track.AddChild(_fill);
 
         // 首次注入提示(左上角,不挡条)
@@ -257,10 +287,10 @@ public static class ItsLoading
                 if (Recorder.BootAnchorMsec >= 0)
                 {
                     Recorder.PhaseSpans.Add(new Api.LoadSpan(
-                        "prelude(Steam+工坊+本地扫描)", Api.LoadPhase.Prelude,
+                        "phase.prelude", Api.LoadPhase.Prelude,
                         Recorder.BootAnchorMsec, nowMsec - Recorder.BootAnchorMsec, ""));
                     Recorder.PhaseSpans.Add(new Api.LoadSpan(
-                        "engine_init(C++ 初始化)", Api.LoadPhase.Prelude,
+                        "phase.engine_init", Api.LoadPhase.Prelude,
                         0, Recorder.BootAnchorMsec, ""));
                 }
             }
@@ -272,12 +302,27 @@ public static class ItsLoading
         }
         else
         {
-            Log.Warn("[ItsLoading] no boot splash found (first run after install)");
+            // 三种可能:真·首装(本 run 刚注入,下次启动生效)/ override.cfg 未被引擎采用 /
+            // gd 脚本加载失败。日志里若同时没有任何 [LoadingBarBoot] 行,可定位到后两者。
+            Log.Warn("[ItsLoading] no boot splash node — first run after install, " +
+                     "override.cfg not applied, or boot script failed to load");
         }
     }
 
-    /// <summary>GDScript 启动画面源码。BOOT_VERSION = 7(转义修复版):内容哈希门控自注入。</summary>
-    private const string BootSplashGd = @"extends Node
+    /// <summary>
+    /// GDScript 启动画面源码(生成产物,内容哈希门控自注入)。
+    /// 颜色 token(@@*_COLOR@@)由 BuildBootSplashGd() 用共享常量替换——勿在模板里写死颜色;
+    /// 几何常量(24/8/20/36/14/56/5/64/48)与 C# BuildBar 成对,改布局需手动同步。
+    /// </summary>
+    private static readonly string BootSplashGd = BuildBootSplashGd();
+
+    private static string BuildBootSplashGd() =>
+        BootSplashGdTemplate
+            .Replace("@@TRACK_COLOR@@", GdColor(BarTrackColor))
+            .Replace("@@DETAIL_COLOR@@", GdColor(BarDetailColor))
+            .Replace("@@FILL_COLOR@@", GdColor(BarFillColor));
+
+    private const string BootSplashGdTemplate = @"extends Node
 # LoadingBar boot splash — injected by ItsLoading mod. BOOT_VERSION = 7
 # 启动时主动自检:mod 在 settings 里被禁用、或本地/工坊文件均已不存在,
 # 则不显示任何进度条,并错后 2 秒做原子自清理(避开启动期 I/O;任何时刻被强退均无害)。
@@ -307,6 +352,7 @@ var _steam_total := -1
 var _poll_acc := 0.0
 var boot_start_msec := 0
 var _lang_zh := false
+var _frozen := false
 
 func _ready() -> void:
 	boot_start_msec = Time.get_ticks_msec()
@@ -372,14 +418,29 @@ func _settings_files() -> Array:
 		d.list_dir_end()
 	return out
 
+# 从可执行文件目录逐级向上探测 workshop/content/2868840:
+# macOS 的 .app 布局在上方第 5 级(Contents/MacOS → …/steamapps),
+# Windows/Linux 的直接布局在第 3 级(游戏目录 → …/steamapps)。
+# 固定走 5 级在 Win/Linux 会高出 Steam 库两级,工坊检测永远失败(todo#3)。
+func _workshop_root() -> String:
+	var d := OS.get_executable_path().get_base_dir()
+	for i in range(8):
+		var root := d.path_join(""workshop/content/2868840"")
+		if DirAccess.dir_exists_absolute(root):
+			return root
+		var parent := d.get_base_dir()
+		if parent == d:
+			return """"
+		d = parent
+	return """"
+
 func _mod_files_present() -> bool:
 	var exe_dir := OS.get_executable_path().get_base_dir()
 	if FileAccess.file_exists(exe_dir.path_join(""mods/"" + MOD_ID + ""/"" + MOD_ID + "".json"")):
 		return true
-	var d := exe_dir
-	for i in range(5):
-		d = d.get_base_dir()
-	var ws_root := d.path_join(""workshop/content/2868840"")
+	var ws_root := _workshop_root()
+	if ws_root == """":
+		return false
 	var ws := DirAccess.open(ws_root)
 	if ws:
 		ws.list_dir_begin()
@@ -453,7 +514,9 @@ func _cfg_without_us(s: String) -> String:
 func _build_ui() -> void:
 	var vs: Vector2 = get_viewport().get_visible_rect().size
 	_layer = CanvasLayer.new()
-	_layer.layer = 999
+	# 998:C# 条在 999。两条同为 999 时,首次 ForceDraw 的同层双 canvas 会让
+	# MoltenVK 掉帧 → prelude 与 C# 条之间出现 ~0.4s 黑屏(2026-08-26 实测)。
+	_layer.layer = 998
 	add_child(_layer)
 
 	var strip := Control.new()
@@ -465,13 +528,13 @@ func _build_ui() -> void:
 	_step.position = Vector2(24, 8)
 	_step.add_theme_font_size_override(""font_size"", 20)
 	_step.add_theme_color_override(""font_color"", Color.WHITE)
-	_step.text = ""正在启动""
+	_step.text = txt(""正在启动"", ""Starting"")
 	strip.add_child(_step)
 
 	_detail = Label.new()
 	_detail.position = Vector2(24, 36)
 	_detail.add_theme_font_size_override(""font_size"", 14)
-	_detail.add_theme_color_override(""font_color"", Color(0.85, 0.86, 0.9))
+	_detail.add_theme_color_override(""font_color"", @@DETAIL_COLOR@@)
 	_detail.text = ""engine boot""
 	strip.add_child(_detail)
 
@@ -479,13 +542,13 @@ func _build_ui() -> void:
 	var track := ColorRect.new()
 	track.position = Vector2(24, 56)
 	track.size = Vector2(_track_w, 5)
-	track.color = Color(1, 1, 1, 0.25)
+	track.color = @@TRACK_COLOR@@
 	strip.add_child(track)
 
 	_fill = ColorRect.new()
 	_fill.position = Vector2.ZERO
 	_fill.size = Vector2(0, 5)
-	_fill.color = Color(0.2, 0.85, 0.9)
+	_fill.color = @@FILL_COLOR@@
 	track.add_child(_fill)
 
 func _skip_log_history() -> void:
@@ -498,6 +561,13 @@ func _process(delta: float) -> void:
 	if _cleanup_pending and not _cleaned and _elapsed >= CLEANUP_DELAY:
 		_do_cleanup()
 	if _done:
+		return
+	if _frozen:
+		# 同步突发已开始(首个 mod dll 加载,帧停止流动):冻结一切 UI 变更。
+		# 阻塞瞬间若存在未提交的文字变更(字形重排异步),已呈现帧会被渲染端
+		# 失效 → prelude 与 C# 条之间黑屏(2026-08-26 实测间歇复现)。30s 安全网仍生效。
+		if _elapsed > 30.0:
+			takeover()
 		return
 	_t += delta
 	_poll_acc += delta
@@ -514,7 +584,7 @@ func _set_progress(n: int, total: int, detail: String) -> void:
 	if total > 0 and n <= total:
 		var frac := FRAC_END * float(n) / float(total)
 		_fill.size.x = _track_w * frac
-		_step.text = ""创意工坊读取 %d/%d"" % [n, total]
+		_step.text = txt(""创意工坊读取 %d/%d"", ""Reading Workshop %d/%d"") % [n, total]
 		_detail.text = detail
 
 func _poll_log() -> void:
@@ -554,9 +624,10 @@ func _handle_line(line: String) -> void:
 			_steam_total = _count_workshop()
 		_set_progress(_steam_n, _steam_total, ""workshop "" + id)
 	elif ""Loading assembly DLL"" in line:
-		var dll_id := line.get_file().replace("".dll"", """")
-		_step.text = ""模组加载""
-		_detail.text = dll_id
+		# 首个 mod dll 开始加载 = 同步突发立即开始、帧将停止。此处绝不能再改
+		# UI(见 _process 的 _frozen 注释)——mod 段的显示由 C# 条负责,只设冻结标志。
+		# 标志在「本会改文字的同一迭代」内生效,竞态窗口被精确关闭。
+		_frozen = true
 
 func _extract_item_id(line: String) -> String:
 	var parts := line.split("" "")
@@ -566,10 +637,10 @@ func _extract_item_id(line: String) -> String:
 	return """"
 
 func _count_workshop() -> int:
-	var d := OS.get_executable_path().get_base_dir()
-	for i in range(5):
-		d = d.get_base_dir()
-	var dir := DirAccess.open(d.path_join(""workshop/content/2868840""))
+	var ws_root := _workshop_root()
+	if ws_root == """":
+		return -1
+	var dir := DirAccess.open(ws_root)
 	if dir == null:
 		return -1
 	var n := 0
@@ -597,6 +668,16 @@ func takeover() -> void:
     /// 游戏 Initialize 结尾会按 _mods 顺序重建 mod_list,且优雅退出时由游戏
     /// 自行保存设置——因此只做内存重排,绝不自己写用户的 settings.save。
     /// (若首装后的第一次启动被强退,下次仍不完整,再下次自愈;可接受。)
+    ///
+    /// ⚠️ 时机陷阱(2026-08-26 todo#1):本方法运行在游戏 Initialize 的
+    /// `foreach (Mod m in _mods) TryLoadMod(m)` 枚举体内(我们正是当前元素)。
+    /// List&lt;T&gt; 枚举器每次 MoveNext 都校验 _version,RemoveAt/Insert 会让
+    /// 下一次 MoveNext 抛 InvalidOperationException → 启动中止、mod_list 不重建,
+    /// 首装玩家每次启动都崩。CallDeferred 也来不及(deferred 队列在同步突发期
+    /// 不执行,而 mod_list 在同一方法末尾就重建了)。因此这里做"不触碰
+    /// _version 的原地搬移":直接把 _items[0..idx-1] 右移一位、自身放到 [0],
+    /// 不改 _size/_version——枚举器按 _items[_index] 现场取值,idx 之后的
+    /// 未枚举元素原位不动,循环照常走完,Initialize 结尾照常按新顺序重建。
     /// </summary>
     private static void EnsureFirstInLoadOrder()
     {
@@ -618,9 +699,18 @@ func takeover() -> void:
             }
             return;
         }
-        var me = mods[idx];
-        mods.RemoveAt(idx);
-        mods.Insert(0, me);
+        // 不用 RemoveAt+Insert(枚举中会崩),直接挪内部数组;内部结构不符合
+        // 预期(未来 .NET 改字段)则放弃重排——优雅降级,绝不让游戏崩。
+        var items = AccessTools.Field(typeof(System.Collections.Generic.List<Mod>), "_items")
+            .GetValue(mods) as Mod[];
+        if (items == null || idx >= items.Length)
+        {
+            Log.Warn("[ItsLoading] List<T> internals not as expected — load order left as-is");
+            return;
+        }
+        var me = items[idx];
+        Array.Copy(items, 0, items, 1, idx);
+        items[0] = me;
         Log.Warn($"[ItsLoading] moved self to load order #0 (was #{idx + 1}, " +
                  $"{loadedBeforeUs} mods loaded before us) — full timing coverage from next boot");
     }
@@ -633,17 +723,27 @@ func takeover() -> void:
     // RegisterWaterfallInBaseLib 这一个方法里 —— BaseLib 缺席时它永不被
     // 调用、WaterfallConfig 类型永不加载(JIT 按方法惰性解析),不影响本 mod。
 
-    private static CanvasLayer _waterfallLayer;
     private static Godot.Node? _bootSplashNode; // 延迟清理的 gd splash 引用
+    private static CanvasLayer _waterfallLayer; // 瀑布图层(打开期间兼作热键阻断屏)
+    private static bool _wfRegistered;          // 瀑布图入口是否已注册(防重复)
 
     /// <summary>
-    /// 仅在 BaseLib 已加载时被调用。BaseLib 类型只存在于独立的兼容垫片
+    /// BaseLib 已加载时注册(常规路径 = AfterModLoad 观察到 BaseLib 加载完成;
+    /// 兜底路径 = 菜单就绪时补注册)。BaseLib 类型只存在于独立的兼容垫片
     /// ItsLoadingCompat.dll 中 —— 主 dll 绝不引用 BaseLib(否则 ModManager 的
     /// assembly.GetTypes() 会在 BaseLib 未加载时抛 ReflectionTypeLoadException,
     /// v0.11.0 的翻车根源),垫片在此刻手动 LoadFrom,类型解析必然成功。
+    /// 首启时我们排在队尾,BaseLib 早在补丁安装前加载完,AfterModLoad 不可能
+    /// 观察到它 —— 没有兜底的话瀑布图入口要等到第二次启动才存在(2026-08-27)。
     /// </summary>
     private static void RegisterWaterfallInBaseLib()
     {
+        if (_wfRegistered) return;
+        if (!ModManager.GetLoadedMods().Any(m => m.manifest?.id == "BaseLib"))
+        {
+            Log.Warn("[ItsLoading] BaseLib not loaded — waterfall entry skipped");
+            return;
+        }
         string shimPath = Path.Combine(
             Path.GetDirectoryName(typeof(ItsLoading).Assembly.Location) ?? ".", "ItsLoadingCompat.dll");
         if (!File.Exists(shimPath))
@@ -655,6 +755,7 @@ func takeover() -> void:
         shim.GetType("ItsLoadingCompat.Entry")?
             .GetMethod("Register")?
             .Invoke(null, new object[] { "ItsLoading" });
+        _wfRegistered = true;
         Log.Warn("[ItsLoading] waterfall entry registered in BaseLib (via shim)");
     }
 
@@ -668,13 +769,15 @@ func takeover() -> void:
     {
         Run("show waterfall", () =>
         {
-            // 再按一次 = 关闭(toggle)
+            // toggle:再按一次 = 关闭
             if (_waterfallLayer != null)
             {
-                _waterfallLayer.QueueFree();
-                _waterfallLayer = null;
+                CloseWaterfall();
                 return;
             }
+            // 玩家可能在本次会话内切换过语言(SettingsSave.Language 是实时值)——
+            // 进度条阶段的表在启动时加载,瀑布图打开时重读一次(懒刷新)。
+            I18n.Init();
             var tree = (SceneTree)Engine.GetMainLoop();
             Vector2 vs = tree.Root.GetVisibleRect().Size;
 
@@ -686,8 +789,7 @@ func takeover() -> void:
             {
                 if (e is InputEventMouseButton mb && mb.Pressed)
                 {
-                    _waterfallLayer?.QueueFree();
-                    _waterfallLayer = null;
+                    CloseWaterfall();
                 }
             };
             _waterfallLayer.AddChild(dim);
@@ -704,21 +806,56 @@ func takeover() -> void:
 
             var close = new Button { Text = I18n.T("wf.close") };
             close.Position = new Vector2(vs.X - 180f, 24f);
-            close.Pressed += () => Run("close waterfall", () =>
-            {
-                _waterfallLayer?.QueueFree();
-                _waterfallLayer = null;
-            });
+            close.Pressed += CloseWaterfall;
             _waterfallLayer.AddChild(close);
 
             if (Api.LoadingDurations.IsReady)
             {
-                BuildWaterfallChart(vs);
+                BuildWaterfallChart(_waterfallLayer, vs);
             }
 
             tree.Root.AddChild(_waterfallLayer);
+
+            // 输入接入游戏的热键栈(NHotkeyManager 挂在 NGame,菜单/局内常驻——设置页
+            // 的 TabLeft/TabRight 也走它;capstone 容器只在局内存在,菜单下是 null,
+            // 2026-08-27 实测)。阻断屏压住背后全部热键(模态语义),再压 cancel→关闭:
+            // LIFO 栈 + 命中即 SetInputAsHandled,ESC 不会再被背后设置页抢走;
+            // IsActionPressed 匹配 NInputManager 再分发的动作名 → 自动跟随玩家改键与手柄。
+            var hm = MegaCrit.Sts2.Core.Nodes.CommonUi.NHotkeyManager.Instance;
+            if (hm != null)
+            {
+                hm.AddBlockingScreen(_waterfallLayer);
+                hm.PushHotkeyPressedBinding(
+                    MegaCrit.Sts2.Core.ControllerInput.MegaInput.cancel, CloseWaterfall);
+            }
+            else
+            {
+                Log.Warn("[ItsLoading] NHotkeyManager unavailable — cancel key won't close waterfall");
+            }
             Log.Info("[ItsLoading] waterfall opened");
         });
+    }
+
+    private static void CloseWaterfall()
+    {
+        var hm = MegaCrit.Sts2.Core.Nodes.CommonUi.NHotkeyManager.Instance;
+        if (hm != null)
+        {
+            hm.RemoveHotkeyPressedBinding(
+                MegaCrit.Sts2.Core.ControllerInput.MegaInput.cancel, CloseWaterfall);
+            hm.RemoveBlockingScreen(_waterfallLayer);
+        }
+        _waterfallLayer?.QueueFree();
+        _waterfallLayer = null;
+    }
+
+    /// <summary>瀑布图行标签:mod 行用 manifest.name(与游戏 mod 列表一致),其余查 i18n 表。</summary>
+    private static string WfRowLabel(Api.LoadSpan s)
+    {
+        string modName = ModManager.Mods.FirstOrDefault(m => m.manifest?.id == s.Id)
+            ?.manifest?.name;
+        if (!string.IsNullOrEmpty(modName)) return modName;
+        return I18n.T(s.Id);
     }
 
     private static Color WfColor(Api.LoadPhase p) => p switch
@@ -730,7 +867,55 @@ func takeover() -> void:
         _ => Colors.White,
     };
 
-    private static void BuildWaterfallChart(Vector2 vs)
+    /// <summary>
+    /// 渲染层的空白填补(纯展示,不写入 Api 数据——公开 API 保持纯测量语义):
+    /// ① 首行之前的空白:首启时我们可观测之前的「游戏预加载」段(引擎 C++ 初始化 +
+    ///    Steam 读取 + 工坊扫描,C# 侧看不到),占位提示下次启动可获完整数据;
+    /// ② prelude 行结束与首个 mod 行之间的窄缝:本 mod 自身的 dll 加载与 Init
+    ///    (自身 TryLoadMod 的 prefix 装不上补丁,起点只能近似,可能留缝)。
+    /// 两个填补都只在缝隙实际存在(>阈值)时出现。
+    /// </summary>
+    private static void FillWaterfallGaps(System.Collections.Generic.List<Api.LoadSpan> rows)
+    {
+        if (rows.Count == 0) return;
+        var fills = new System.Collections.Generic.List<Api.LoadSpan>();
+        double firstStart = rows[0].StartMs;
+        if (firstStart > 100)
+        {
+            fills.Add(new Api.LoadSpan(I18n.T("wf.preBoot"), Api.LoadPhase.Prelude, 0, firstStart, ""));
+        }
+        double preludeEnd = double.MinValue;
+        foreach (var r in rows)
+        {
+            if (r.Phase == Api.LoadPhase.Prelude)
+                preludeEnd = Math.Max(preludeEnd, r.StartMs + r.DurationMs);
+        }
+        // 取「起点晚于 prelude 结束」的首个 mod 行:本 mod 自身行的起点(≈Init 开始)
+        // 早于 prelude 结束(交接发生在 Init 中途),若取全表最早会让缝隙算成负数、
+        // 填补永不触发(2026-08-27 用户实测 waterfall 中无填补行)。
+        double firstModStart = double.MaxValue;
+        foreach (var r in rows)
+        {
+            if (r.Phase == Api.LoadPhase.ModLoad && r.StartMs > preludeEnd && r.StartMs < firstModStart)
+                firstModStart = r.StartMs;
+        }
+        Log.Info($"[ItsLoading] wf gaps: preludeEnd={preludeEnd:F0}ms " +
+                 $"firstModAfterPrelude={(firstModStart < double.MaxValue ? firstModStart.ToString("F0") + "ms" : "none")} " +
+                 $"gap={(firstModStart < double.MaxValue ? (firstModStart - preludeEnd).ToString("F0") + "ms" : "n/a")}");
+        if (preludeEnd > double.MinValue && firstModStart < double.MaxValue &&
+            firstModStart - preludeEnd > 20)
+        {
+            fills.Add(new Api.LoadSpan(I18n.T("wf.handoffGap"), Api.LoadPhase.ModLoad,
+                preludeEnd, firstModStart - preludeEnd, ""));
+        }
+        if (fills.Count == 0) return;
+        rows.AddRange(fills);
+        rows.Sort((a, b) => a.StartMs != b.StartMs
+            ? a.StartMs.CompareTo(b.StartMs)
+            : b.DurationMs.CompareTo(a.DurationMs));
+    }
+
+    internal static void BuildWaterfallChart(Node parent, Vector2 vs)
     {
         double total = Math.Max(1.0, Api.LoadingDurations.TotalBootMs);
 
@@ -743,6 +928,7 @@ func takeover() -> void:
         rows.Sort((a, b) => a.StartMs != b.StartMs
             ? a.StartMs.CompareTo(b.StartMs)
             : b.DurationMs.CompareTo(a.DurationMs));
+        FillWaterfallGaps(rows);
 
         // 滚动区(菜单阶段正常帧循环,Container 可用)
         var scroll = new ScrollContainer();
@@ -751,7 +937,7 @@ func takeover() -> void:
         scroll.OffsetBottom = -40f;
         scroll.OffsetLeft = 48f;
         scroll.OffsetRight = -48f;
-        _waterfallLayer.AddChild(scroll);
+        parent.AddChild(scroll);
 
         var box = new VBoxContainer
         {
@@ -793,7 +979,10 @@ func takeover() -> void:
 
             var name = new Label
             {
-                Text = $"{s.Id}  {s.DurationMs / 1000.0:F2}s",
+                // 行标签(2026-08-27):Id 存 i18n key 或 mod id(公开 API 返回稳定 key/纯 id)。
+                // 显示时:mod 行查 manifest.name(游戏的 mod 列表同款,中文名存在 manifest 里);
+                // 非 mod 行查 i18n 表(step.atlas 等译出);都不命中原样透传。
+                Text = $"{WfRowLabel(s)}  {s.DurationMs / 1000.0:F2}s",
                 CustomMinimumSize = new Vector2(340f, 18f),
                 ClipText = true,
             };
@@ -844,6 +1033,9 @@ func takeover() -> void:
         Recorder.PrefixCalls++;
         Recorder.ModStartTicks = Sw.ElapsedTicks;
         if (Recorder.FirstModTicks < 0) Recorder.FirstModTicks = Recorder.ModStartTicks;
+        // 突发期前缀补画:AfterModLoad 之外在每个 mod 开始时多一次提交,
+        // 压缩"首次有效出帧"前的盲区(同 first paint 的冗余提交理由)
+        if (UiOk && !_barDead) RenderingServer.ForceDraw();
     }
 
     private static void AfterModLoad(Mod mod)
@@ -880,7 +1072,7 @@ func takeover() -> void:
         {
             _done = true;
             Recorder.PhaseSpans.Add(new Api.LoadSpan(
-                "mod_load", Api.LoadPhase.ModLoad,
+                "phase.mod_load", Api.LoadPhase.ModLoad,
                 Recorder.ToEngineMs(Recorder.FirstModTicks),
                 (Recorder.LastModTicks - Recorder.FirstModTicks) * Recorder.SwTicksToMs,
                 $"{_count} mods"));
@@ -905,13 +1097,19 @@ func takeover() -> void:
 
     // ---- 资产会话实时进度(NAssetLoader._Process 主线程每帧泵 AssetLoadingSession.Process) ----
 
-    /// <summary>启动期的会话名 → 单条进度刻度上的子区间。游戏内会话(房间/角色)不在此表,自动忽略。</summary>
+    /// <summary>
+    /// 启动期的会话名 → 单条进度刻度上的子区间。游戏内会话(房间/角色)不在此表,自动忽略。
+    /// 注意没有 "MainMenu" 会话:游戏唯一创建它的 PreloadManager.LoadMainMenuAssets 零调用者,
+    /// 菜单资产实际由 "Common" 会话加载(LoadCommonAndMainMenuAssets),但那发生在
+    /// ExecuteDeferred(=条的 1.0 完成点与 Freeze 点)之后、条 2 秒弥留期内——若映射它,
+    /// postfix 会把已显示 1.0「完成」的条拽回 0.88。启动边界定在菜单就绪,延迟资产
+    /// 属启动后后台工作,不进条也不进冻结的 Api 数据(todo#4,2026-08-27)。
+    /// </summary>
     private static readonly System.Collections.Generic.Dictionary<string, (float Start, float End)> SessionRanges =
         new()
         {
             { "IntroLogo", (0.66f, 0.70f) },
             { "MainMenuEssentials", (0.70f, 0.82f) },
-            { "MainMenu", (0.88f, 1.00f) },
         };
 
     // ConditionalWeakTable:session 结束后可被 GC,不阻止回收;值对象复用,无 per-frame 分配
@@ -1034,7 +1232,11 @@ func takeover() -> void:
                     $"{loaded}/{stat.Total}"));
             }
 
-            float local = 1f - remaining / (float)stat.Total;
+            // 除零防护(todo#5):会话首见时可能 loaded 与 remaining 同时为 0(资产批量
+            // 加载失败时 AssetLoadingSession.Process 会静默丢弃非 Ok 的请求、一调用内
+            // 清空完成)→ 0/0 = NaN;Clamp(NaN) 仍是 NaN、赋给 _fill.Size 不抛异常,
+            // 填充条几何退化直到下一次有效 SetProgress。空会话按已完成处理。
+            float local = stat.Total > 0 ? 1f - remaining / (float)stat.Total : 1f;
             float frac = range.Start + (range.End - range.Start) * local;
             SetProgress(frac, I18n.T("bar.assets", new() { ["name"] = name }), I18n.T("bar.assetsCount", new() { ["n"] = $"{loaded}/{stat.Total}" }), forceDraw: false);
         }
@@ -1099,7 +1301,20 @@ func takeover() -> void:
         {
             Recorder.TotalBootMs = (long)Time.GetTicksMsec() - Recorder.BootAnchorMsec;
         }
+        else
+        {
+            // 首启兜底(todo#6):注入发生在 mod 加载期、autoload 已解析完,gd 节点
+            // 不存在 → BootAnchorMsec=-1。原逻辑跳过赋值 → TotalBootMs=-1 → 瀑布图
+            // 标题"-0.0s total"、total=Max(1.0,-1)=1ms、所有条形定位到屏幕外。
+            // 兜底用 0 锚点:TotalBootMs=引擎至今总时长;span 的 StartMs 本就是绝对
+            // 引擎毫秒,÷total 的分数定位自然正确(prelude 段无数据,从 mods 起)。
+            Recorder.TotalBootMs = (long)Time.GetTicksMsec();
+        }
         Api.LoadingDurations.Freeze();
+
+        // 首启兜底注册瀑布图入口:见 RegisterWaterfallInBaseLib 的注释
+        // (此刻 BaseLib 必已加载,LoadedMods 检查在内)
+        Run("register waterfall at menu", RegisterWaterfallInBaseLib);
 
         // 一行启动摘要(诊断用,常量级日志)
         if (Recorder.ModSpans.Count > 0)

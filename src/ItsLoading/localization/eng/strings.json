@@ -17,5 +17,10 @@
   "hint.injected": "It's Loading · boot splash injected, fully active from the next launch",
   "wf.title": "Startup waterfall · {s}s total",
   "wf.notReady": "Startup waterfall · data not ready (complete one full launch first)",
-  "wf.close": "✕ Close"
+  "wf.close": "✕ Close",
+  "wf.preBoot": "Game preload · more info from next boot",
+  "wf.handoffGap": "Godot engine startup",
+  "phase.prelude": "Prelude (Steam + Workshop + local scan)",
+  "phase.engine_init": "Engine init (C++, before frame 0)",
+  "phase.mod_load": "Mod loading"
 }

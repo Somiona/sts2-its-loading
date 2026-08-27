@@ -13,7 +13,7 @@ internal static class I18n
 {
     private static Dictionary<string, string> _table = new();
 
-    /// <summary>在 mod 初始化最前调用(此时 SettingsSave 已加载)。</summary>
+    /// <summary>在 mod 初始化最前调用(此时 SettingsSave 已加载)。幂等,可重复调用。</summary>
     public static void Init()
     {
         string lang = MegaCrit.Sts2.Core.Saves.SaveManager.Instance?.SettingsSave?.Language ?? "eng";
