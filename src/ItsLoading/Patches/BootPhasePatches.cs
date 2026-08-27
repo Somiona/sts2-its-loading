@@ -102,7 +102,7 @@ internal static class BootPhasePatches
 
     private static void AfterSessionProcess(object __instance)
     {
-        try
+        ItsLoading.Run("read session state", () =>
         {
             if (ItsLoading.Timeline == null) return;
             if (_fName == null) CacheSessionFields(__instance.GetType());
@@ -122,11 +122,7 @@ internal static class BootPhasePatches
             ItsLoading.Timeline.SessionAdvanced(__instance, name, loaded, remaining,
                 I18n.T("bar.assets", new() { ["name"] = name }),
                 total => I18n.T("bar.assetsCount", new() { ["n"] = $"{loaded}/{total}" }));
-        }
-        catch (Exception e)
-        {
-            Log.Error($"[ItsLoading] FAILED to read session state: {e}");
-        }
+        });
     }
 
     private static void BeforeLogoPlay()

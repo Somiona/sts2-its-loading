@@ -93,16 +93,23 @@ internal static class BootSplash
 
     /// <summary>
     /// GDScript 启动画面源码(生成产物,内容哈希门控自注入)。
-    /// 颜色 token(@@*_COLOR@@)由 BuildBootSplashGd() 用共享常量替换——勿在模板里写死颜色;
+    /// 替换 token(由 BuildBootSplashGd() 用共享常量替换,勿在模板里写死):
+    ///   @@MOD_ID@@ / @@AUTOLOAD_NAME@@ / @@GD_USER_PATH@@ / @@CFG_MARKER@@ —— 身份契约,
+    ///   与 C# 侧常量同源(漂移 = 自清理失灵,故必须走 token)
+    ///   @@*_COLOR@@ —— 颜色(条样式唯一真源在 ItsLoading)
     /// 几何常量(24/8/20/36/14/56/5/64/48)与 C# BuildBar 成对,改布局需手动同步。
     /// </summary>
     private static readonly string BootSplashGd = BuildBootSplashGd();
 
     private static string BuildBootSplashGd() =>
         BootSplashGdTemplate
-            .Replace("@@TRACK_COLOR@@", GdColor(ItsLoading.BarTrackColor))
-            .Replace("@@DETAIL_COLOR@@", GdColor(ItsLoading.BarDetailColor))
-            .Replace("@@FILL_COLOR@@", GdColor(ItsLoading.BarFillColor));
+            .Replace("@@MOD_ID@@", ItsLoading.ModId)
+            .Replace("@@AUTOLOAD_NAME@@", AutoloadName)
+            .Replace("@@GD_USER_PATH@@", GdUserPath)
+            .Replace("@@CFG_MARKER@@", CfgMarker)
+            .Replace("@@TRACK_COLOR@@", GdColor(ClassicBar.BarTrackColor))
+            .Replace("@@DETAIL_COLOR@@", GdColor(ClassicBar.BarDetailColor))
+            .Replace("@@FILL_COLOR@@", GdColor(ClassicBar.BarFillColor));
 
     /// <summary>Color → GDScript 字面量(不变文化,防区域设置把小数点变逗号)。</summary>
     private static string GdColor(Color c) => string.Create(
@@ -110,7 +117,7 @@ internal static class BootSplash
         $"Color({c.R:0.####}, {c.G:0.####}, {c.B:0.####}, {c.A:0.####})");
 
     private const string BootSplashGdTemplate = @"extends Node
-# LoadingBar boot splash — injected by ItsLoading mod. BOOT_VERSION = 8
+# LoadingBar boot splash — injected by ItsLoading mod. BOOT_VERSION = 9
 # 启动时主动自检:mod 在 settings 里被禁用、或本地/工坊文件均已不存在,
 # 则不显示任何进度条,并错后 2 秒做原子自清理(避开启动期 I/O;任何时刻被强退均无害)。
 # 正常路径:与 C# 侧一致的底部条(无垫底),负责进度刻度 0 → 0.25,
@@ -118,7 +125,7 @@ internal static class BootSplash
 
 const LOG_PATH := ""user://logs/godot.log""
 const FRAC_END := 0.25
-const MOD_ID := ""ItsLoading""
+const MOD_ID := ""@@MOD_ID@@""
 const CLEANUP_DELAY := 2.0
 
 var _layer: CanvasLayer
@@ -267,7 +274,7 @@ func _mod_dir() -> String:
 func _mod_files_present() -> bool:
 	return _mod_dir() != """"
 
-# 错后清理:①临时文件+rename 原子替换 override.cfg ②删脚本 ③删遗留心跳文件。
+# 错后清理:①临时文件+rename 原子替换 override.cfg ②删脚本。
 # 任何时刻被强退:2 秒内 = 零写入;①之后 = cfg 已干净,gd 文件惰性无害。
 func _do_cleanup() -> void:
 	_cleaned = true
@@ -286,7 +293,7 @@ func _do_cleanup() -> void:
 				if w2:
 					w2.store_string(filtered)
 					w2.close()
-	for f in [""user://loadingbar_boot.gd"", ""user://loadingbar.heartbeat""]:
+	for f in [""@@GD_USER_PATH@@""]:
 		if FileAccess.file_exists(f):
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(f))
 	print(""[LoadingBarBoot] self-cleanup complete"")
@@ -296,9 +303,9 @@ func _cfg_without_us(s: String) -> String:
 	var pass1 := PackedStringArray()
 	for line in s.split(""\n""):
 		var t := line.strip_edges()
-		if t.begins_with("";"") and ""LoadingBar mod autoload"" in t:
+		if t.begins_with("";"") and ""@@CFG_MARKER@@"" in t:
 			continue
-		if ""LoadingBarBoot"" in t and t.find(""="") > -1:
+		if ""@@AUTOLOAD_NAME@@"" in t and t.find(""="") > -1:
 			continue
 		pass1.append(line)
 	var out := PackedStringArray()

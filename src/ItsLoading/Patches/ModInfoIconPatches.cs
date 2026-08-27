@@ -32,7 +32,7 @@ internal static class ModInfoIconPatches
 
     private static void AfterModInfoFill(object __instance, Mod mod)
     {
-        if (mod?.manifest?.id != "ItsLoading") return;
+        if (mod?.manifest?.id != ItsLoading.ModId) return;
         ItsLoading.Run("set mod icon", () =>
         {
             string imgPath = Path.Combine(mod.path, "mod_image.png");

@@ -28,6 +28,8 @@ REQUIRED_SETTINGS_KEYS = [
     "ITSLOADING-mod_title",
     "ITSLOADING-OPEN_WATERFALL.title",
     "ITSLOADING-VIEW.title",
+    "ITSLOADING-NEXT_THEME.title",
+    "ITSLOADING-SWITCH.title",
 ]
 
 

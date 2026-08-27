@@ -13,6 +13,7 @@ namespace ItsLoading;
 internal static class LoaderPatches
 {
     private static long _lastMs; // 逐 mod 毫秒差(诊断文本用)
+    private static int _lastG0, _lastG1, _lastG2; // 上个 postfix 时的 GC 回收次数(缝隙归因用)
 
     internal static void Install()
     {
@@ -31,6 +32,17 @@ internal static class LoaderPatches
 
     private static void BeforeTryLoadMod(Mod mod)
     {
+        // 缝隙归因:两次 TryLoadMod 之间是游戏的裸 foreach(无游戏代码),
+        // >100ms 即主线程被暂停——看 GC 各代回收次数是否跨缝增加(2026-08-28
+        // 实测 RitsuLib 前有 ~1s 空档,RegentFX/BetterModMenu 处 delta==span 证明测量无误)
+        long now = ItsLoading.Sw.ElapsedMilliseconds;
+        if (_lastMs > 0 && now - _lastMs > 100)
+        {
+            Log.Warn($"[ItsLoading] inter-mod gap {now - _lastMs}ms before {mod.manifest?.id} " +
+                     $"(GC delta gen0={GC.CollectionCount(0) - _lastG0} " +
+                     $"gen1={GC.CollectionCount(1) - _lastG1} " +
+                     $"gen2={GC.CollectionCount(2) - _lastG2})");
+        }
         // 单次时钟读;mod 段总区间起点 + 突发期前缀补画(经 Presenter 出帧)
         ItsLoading.Timeline.ModStarted();
     }
@@ -40,6 +52,9 @@ internal static class LoaderPatches
         long now = ItsLoading.Sw.ElapsedMilliseconds;
         long delta = now - _lastMs;
         _lastMs = now;
+        _lastG0 = GC.CollectionCount(0);
+        _lastG1 = GC.CollectionCount(1);
+        _lastG2 = GC.CollectionCount(2);
         string id = mod.manifest?.id ?? "<null>";
 
         // 计数在时间线:计数依赖的文案以 Func<int,string> 传入,末个 mod 完成时呈现 0.60

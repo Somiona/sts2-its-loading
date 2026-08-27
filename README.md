@@ -16,6 +16,10 @@
 - 正在加载哪个模组、花了多少毫秒
 - 游戏启动到哪一步(图集 / 本地化 / 模型数据库 / 资源预载……)
 
+<p align="center"><img src="load_bar.png" alt="启动画面:工坊读取进度条"/></p>
+
+<sub>现在打开游戏不用看着黑屏一直傻等着了。</sub>
+
 ## 安装
 
 **Steam 创意工坊**: 订阅即用。
@@ -55,6 +59,10 @@ This mod shows a progress bar during game startup, telling you **what is actuall
 - Reading Steam Workshop subscriptions (which one / how many)
 - Which mod is being loaded, down to the millisecond
 - Which boot step the game is on (atlases / localization / model database / preload…)
+
+<p align="center"><img src="load_bar.png" alt="Boot splash: workshop reading progress bar"/></p>
+
+<sub>No more staring at a black screen while the game boots.</sub>
 
 ## Install
 

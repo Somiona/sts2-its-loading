@@ -1,5 +1,7 @@
 {
   "ITSLOADING-mod_title": "不再干等",
   "ITSLOADING-OPEN_WATERFALL.title": "启动瀑布图",
-  "ITSLOADING-VIEW.title": "查看"
+  "ITSLOADING-VIEW.title": "查看",
+  "ITSLOADING-NEXT_THEME.title": "加载主题(循环切换,下次启动生效)",
+  "ITSLOADING-SWITCH.title": "切换"
 }

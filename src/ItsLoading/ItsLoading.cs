@@ -16,32 +16,27 @@ namespace ItsLoading;
 ///   3. gd 与 C# 渲染完全一致的样式 —— frame 0 接管无视觉跳变
 ///   4. 单一进度刻度 0→1 由 BootTimeline 拥有:工坊读取 0-0.25 / mod 加载 0.25-0.60 / Essential 0.60-0.88 / 菜单就绪 0.88-1.0(启动边界 = 菜单可交互,延迟资产不进条)
 ///
-/// 本类 = 启动编排层:Init 顺序、进度条 UI(呈现)、load-order 手术。
+/// 本类 = 启动编排层:Init 顺序、load-order 手术。UI 呈现在主题里(Themes/)。
 /// 伴生模块:
 ///   BootTimeline.cs     —— 启动时间线(#3 深模块:刻度表 + span 记录 + 冻结;钩子经它推进度)
 ///   Patches/            —— Harmony 补丁族(#4:loader / boot phases / mod icon)
+///   Themes/             —— 主题缝(#7:ILoadingTheme + 注册表;经典条为默认主题)
 ///   BootSplash.cs       —— gd splash 自注入/交接/延迟回收(帧 0→0.25 段的呈现)
 ///   WaterfallViewer.cs  —— 瀑布图查看器(菜单就绪后的调试 UI)
 /// </summary>
 [ModInitializer("Init")]
 public static class ItsLoading
 {
+    /// <summary>本 mod 的清单 id(与 ItsLoading.json 一致;gd 侧经 @@MOD_ID@@ token 同源)。</summary>
+    internal const string ModId = "ItsLoading";
+
     internal static readonly Stopwatch Sw = Stopwatch.StartNew();
 
     /// <summary>启动时间线(Init 最先创建;查询面 Api.LoadingDurations 与各补丁都经它)。</summary>
     internal static BootTimeline Timeline;
 
-    private static CanvasLayer _layer;
-    private static Label _stepLabel;   // 第一行:当前步骤 + 计数
-    private static Label _detailLabel; // 第二行:当前对象 + 耗时
-    private static ColorRect _fill;    // 进度填充
-    private static float _barFullWidth;
-
-    private static bool UiOk => _layer != null;
-
-    // 条移除后 AssetLoadingSession.Process 的 postfix 仍可能触发(游戏内房间加载等),
-    // 用死亡标志防止对已释放节点的操作每帧抛异常
-    private static bool _barDead;
+    /// <summary>当前主题(#7:Init 的 build bar 步骤创建;BaseLib 设置可循环切换,下次启动生效)。</summary>
+    internal static ILoadingTheme Theme;
 
     public static void Init()
     {
@@ -50,14 +45,13 @@ public static class ItsLoading
         I18n.Init();
         int total = Math.Max(1, ModManager.Mods.Count);
         // 启动时间线:双时钟注入(构造即对表),呈现走推模型 —— Present 密度 = 加载活动密度
-        Timeline = new BootTimeline(() => (long)Time.GetTicksMsec(), () => Sw.ElapsedTicks)
-        {
-            Presenter = SetProgress,
-        };
+        // (Presenter 在 build bar 步骤接线到当前主题)
+        Timeline = new BootTimeline(() => (long)Time.GetTicksMsec(), () => Sw.ElapsedTicks);
         Run("ensure boot splash installed", BootSplash.Install);
         Run("ensure first in load order", EnsureFirstInLoadOrder);
-        // 顺序关键:先建好条并强制绘制一帧,再隐藏 autoload splash,保证无黑屏间隙
-        Run("build bar", BuildBar);
+        // 顺序关键:先建条再交接——C# 条(999)直接叠在 gd 条(998)之上,不隐藏 gd splash
+        // (隐藏 CanvasLayer 会触发渲染状态变更 → 黑屏间隙,详见 BootSplash.Handoff 注释)
+        Run("build bar", BuildTheme);
         Run("boot splash handoff", BootSplash.Handoff);
         // 原子交接:此刻出帧 = 一帧内完成条与条的切换。
         // 连画 3 次:主线程刚进入同步突发时,首次提交可能被 MoltenVK 丢弃
@@ -90,105 +84,19 @@ public static class ItsLoading
         }
     }
 
-    // ================================================================ UI(全手动定位,无 Container)
+    // ================================================================ 主题接线
 
-    // ---- 条样式共享常量(todo#10:gd splash 模板与 C# 条的唯一真源)----
-    // 颜色是最易漂移的样式类(几何漂移肉眼立见,颜色微漂正是一次漏网),
-    // 因此颜色由这里的常量插值进 BootSplash.cs 的模板;几何常量仍两侧成对,
-    // 改布局时需手动同步(见模板内注释)。
-    internal static readonly Color BarTrackColor = new(1f, 1f, 1f, 0.15f);        // 轨道
-    internal static readonly Color BarDetailColor = new(0.62f, 0.64f, 0.70f, 1f); // 细节文字
-    internal static readonly Color BarFillColor = new(0.2f, 0.85f, 0.9f, 1f);     // 填充
-
-    private static void BuildBar()
+    /// <summary>构建当前主题并接上时间线的呈现(Init 的 build bar 步骤)。</summary>
+    private static void BuildTheme()
     {
-        var tree = (SceneTree)Engine.GetMainLoop();
-        Vector2 vs = tree.Root.GetVisibleRect().Size;
-
-        _layer = new CanvasLayer { Layer = 999 };
-
-        // 定位容器 + 不透明黑垫底(上下各溢出 2px 盖严):
-        // v0.13.x 双条并存期间,gd 条(998,冻结在「52/52」)一直在本条(999)下面渲染,
-        // 两条都是透明设计时文字会交叠(用户可见的"gd 残留")。C# 条一旦开始出帧,
-        // 同几何黑底即完全遮住 gd 条——交接时刻无论早晚都无缝(2026-08-27)。
-        var strip = new Control();
-        strip.SetAnchorsPreset(Control.LayoutPreset.BottomWide);
-        strip.OffsetTop = -64f;
-        _layer.AddChild(strip);
-        var backing = new ColorRect { Color = new Color(0f, 0f, 0f, 1f) };
-        backing.SetAnchorsPreset(Control.LayoutPreset.FullRect);
-        backing.OffsetTop = -2f;
-        backing.OffsetBottom = 2f;
-        strip.AddChild(backing);
-
-        _stepLabel = new Label();
-        _stepLabel.Position = new Vector2(24f, 8f);
-        _stepLabel.AddThemeFontSizeOverride("font_size", 20);
-        _stepLabel.AddThemeColorOverride("font_color", Colors.White);
-        _stepLabel.Text = I18n.T("bar.mods", new() { ["n"] = "1", ["t"] = Math.Max(1, ModManager.Mods.Count).ToString() });
-        strip.AddChild(_stepLabel);
-
-        _detailLabel = new Label();
-        _detailLabel.Position = new Vector2(24f, 36f);
-        _detailLabel.AddThemeFontSizeOverride("font_size", 14);
-        _detailLabel.AddThemeColorOverride("font_color", BarDetailColor);
-        _detailLabel.Text = "";
-        strip.AddChild(_detailLabel);
-
-        _barFullWidth = vs.X - 48f;
-        var track = new ColorRect();
-        track.Position = new Vector2(24f, 56f);
-        track.Size = new Vector2(_barFullWidth, 5f);
-        track.Color = BarTrackColor;
-        strip.AddChild(track);
-
-        _fill = new ColorRect();
-        _fill.Position = Vector2.Zero;
-        _fill.Size = new Vector2(0f, 5f);
-        _fill.Color = BarFillColor;
-        track.AddChild(_fill);
-
-        // 首次注入提示(左上角,不挡条)
-        if (BootSplash.InjectedThisRun)
-        {
-            var hint = new Label();
-            hint.Text = I18n.T("hint.injected");
-            hint.Position = new Vector2(24f, 24f);
-            hint.AddThemeFontSizeOverride("font_size", 14);
-            hint.AddThemeColorOverride("font_color", new Color(0.2f, 0.85f, 0.9f, 1f));
-            _layer.AddChild(hint);
-            var t = tree.CreateTimer(8.0);
-            t.Timeout += () => Run("hide injection hint", () => { if (GodotObject.IsInstanceValid(hint)) hint.QueueFree(); });
-        }
-
-        // 必须直接 AddChild:同步突发期间 deferred 队列永远不会执行
-        // 注意:这里不 ForceDraw —— 画帧时机在隐藏 gd splash 之后,保证交接原子性
-        tree.Root.AddChild(_layer);
-        Log.Warn($"[ItsLoading] bar attached (viewport {vs.X}x{vs.Y})");
+        Theme = ThemeRegistry.BuildActive();
+        Timeline.Presenter = Theme.Present;
     }
 
-    /// <summary>唯一的进度呈现入口(BootTimeline.Presenter 的目标):条宽 + 两行文案 + 强制出帧。</summary>
-    private static void SetProgress(float frac, string step, string detail, bool forceDraw = true)
-    {
-        if (!UiOk || _barDead) return;
-        try
-        {
-            _fill.Size = new Vector2(_barFullWidth * Math.Clamp(frac, 0f, 1f), 5f);
-            if (step != null) _stepLabel.Text = step;
-            if (detail != null) _detailLabel.Text = detail;
-            if (forceDraw) RenderingServer.ForceDraw();
-        }
-        catch (Exception e)
-        {
-            Log.Error($"[ItsLoading] FAILED to update bar: {e}");
-        }
-    }
-
-    /// <summary>条移除(C# 条 QueueFree + gd splash takeover;置 _barDead 挡住移除后的 postfix)。</summary>
+    /// <summary>条移除(主题退休自身节点;gd splash takeover 归编排层)。</summary>
     internal static void RetireBar()
     {
-        _barDead = true;
-        _layer?.QueueFree();
+        Theme?.Retire();
         BootSplash.Takeover(); // C# 条移除时才隐藏 gd splash
     }
 
@@ -219,7 +127,7 @@ public static class ItsLoading
             Log.Warn("[ItsLoading] _mods not accessible — load order left as-is");
             return;
         }
-        int idx = mods.FindIndex(m => m.manifest?.id == "ItsLoading");
+        int idx = mods.FindIndex(m => m.manifest?.id == ModId);
         if (idx < 0) return;
         if (idx == 0)
         {

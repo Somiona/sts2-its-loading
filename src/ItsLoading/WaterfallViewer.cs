@@ -53,7 +53,7 @@ public static class WaterfallViewer
         var shim = Assembly.LoadFrom(shimPath);
         shim.GetType("ItsLoadingCompat.Entry")?
             .GetMethod("Register")?
-            .Invoke(null, new object[] { "ItsLoading" });
+            .Invoke(null, new object[] { ItsLoading.ModId });
         _wfRegistered = true;
         Log.Warn("[ItsLoading] waterfall entry registered in BaseLib (via shim)");
     }
@@ -62,6 +62,9 @@ public static class WaterfallViewer
     public static class CompatHooks
     {
         public static void OpenWaterfall() => Show();
+
+        /// <summary>BaseLib 设置里的主题循环按钮(见 ThemeRegistry.CycleNext)。</summary>
+        public static void NextTheme() => ThemeRegistry.CycleNext();
     }
 
     private static void Show()
