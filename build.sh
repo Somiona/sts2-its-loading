@@ -17,14 +17,22 @@ if [[ ! -f src/ItsLoading/refs/BaseLib.dll ]]; then
   echo "BaseLib ref: $BASELIB_DLL"
 fi
 
+# i18n 门禁:eng 缺使用中的键 = 构建失败(set -e 生效);其他语言缺键出警告
+python3 tools/check_i18n.py
+
 dotnet build src/ItsLoading/ItsLoading.csproj -c Release
 dotnet build src/ItsLoadingCompat/ItsLoadingCompat.csproj -c Release
 
 # 本地化 pck(v3 格式,游戏的 4.5.1 fork 实测可加载;勿用 Godot 4.7 PCKPacker——它写 v4 被拒)
+# 语言列表来自 localization/ 目录,新增语言无需改这里
 OUT="src/ItsLoading/bin/Release/net9.0"
-python3 tools/build_pck.py "$OUT/ItsLoading.pck" \
-  "ItsLoading/localization/zhs/settings_ui.json" src/ItsLoading/localization/zhs/settings_ui.json \
-  "ItsLoading/localization/eng/settings_ui.json" src/ItsLoading/localization/eng/settings_ui.json
+PCK_ARGS=()
+for ui in src/ItsLoading/localization/*/settings_ui.json; do
+  lang_dir="${ui%/settings_ui.json}"
+  lang="${lang_dir##*/}"
+  PCK_ARGS+=("ItsLoading/localization/$lang/settings_ui.json" "$ui")
+done
+python3 tools/build_pck.py "$OUT/ItsLoading.pck" "${PCK_ARGS[@]}"
 
 echo
 echo "dll => src/ItsLoading/bin/Release/net9.0/ItsLoading.dll"

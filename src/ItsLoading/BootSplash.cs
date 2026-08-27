@@ -120,7 +120,7 @@ internal static class BootSplash
         $"Color({c.R:0.####}, {c.G:0.####}, {c.B:0.####}, {c.A:0.####})");
 
     private const string BootSplashGdTemplate = @"extends Node
-# LoadingBar boot splash — injected by ItsLoading mod. BOOT_VERSION = 7
+# LoadingBar boot splash — injected by ItsLoading mod. BOOT_VERSION = 8
 # 启动时主动自检:mod 在 settings 里被禁用、或本地/工坊文件均已不存在,
 # 则不显示任何进度条,并错后 2 秒做原子自清理(避开启动期 I/O;任何时刻被强退均无害)。
 # 正常路径:与 C# 侧一致的底部条(无垫底),负责进度刻度 0 → 0.25,
@@ -148,7 +148,8 @@ var _seen_ids := {}
 var _steam_total := -1
 var _poll_acc := 0.0
 var boot_start_msec := 0
-var _lang_zh := false
+var _lang := ""eng""
+var _strings := {}
 var _frozen := false
 
 func _ready() -> void:
@@ -159,6 +160,7 @@ func _ready() -> void:
 		_cleanup_pending = true
 		print(""[LoadingBarBoot] mod disabled or unsubscribed — bar suppressed, cleanup deferred"")
 	else:
+		_load_strings()
 		_build_ui()
 		_skip_log_history()
 		print(""[LoadingBarBoot] splash ready at frame "", Engine.get_frames_drawn())
@@ -167,11 +169,31 @@ func _detect_language() -> void:
 	for p in _settings_files():
 		var data = JSON.parse_string(FileAccess.get_file_as_string(p))
 		if data is Dictionary and data.get(""language"") is String:
-			_lang_zh = data.get(""language"") == ""zhs""
+			_lang = data.get(""language"")
 			return
 
-func txt(zh: String, en: String) -> String:
-	return zh if _lang_zh else en
+# ---------------- 翻译表(mod 目录 localization/<语言>/strings.json) ----------------
+# 与 C# I18n 同一张表、同一条回退链:目标语言 → eng → 键本身。
+
+func _read_strings(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {}
+	var data = JSON.parse_string(FileAccess.get_file_as_string(path))
+	return data if data is Dictionary else {}
+
+func _load_strings() -> void:
+	var mod_dir := _mod_dir()
+	if mod_dir == """":
+		return
+	_strings = _read_strings(mod_dir.path_join(""localization/eng/strings.json""))
+	if _lang != ""eng"":
+		var overlay := _read_strings(mod_dir.path_join(""localization/"" + _lang + ""/strings.json""))
+		for k in overlay:
+			_strings[k] = overlay[k]
+
+func _txt(key: String) -> String:
+	# 不叫 _t:与 shimmer 计时字段 var _t 冲突会让整个脚本解析失败(2026-08-28 实测)
+	return _strings.get(key, key)
 
 # ---------------- 自检与自清理 ----------------
 
@@ -231,13 +253,15 @@ func _workshop_root() -> String:
 		d = parent
 	return """"
 
-func _mod_files_present() -> bool:
+func _mod_dir() -> String:
+	# 本地安装或工坊条目目录(含 ItsLoading.json 的那层);翻译表在其 localization/ 下
 	var exe_dir := OS.get_executable_path().get_base_dir()
-	if FileAccess.file_exists(exe_dir.path_join(""mods/"" + MOD_ID + ""/"" + MOD_ID + "".json"")):
-		return true
+	var local := exe_dir.path_join(""mods/"" + MOD_ID)
+	if FileAccess.file_exists(local.path_join(MOD_ID + "".json"")):
+		return local
 	var ws_root := _workshop_root()
 	if ws_root == """":
-		return false
+		return """"
 	var ws := DirAccess.open(ws_root)
 	if ws:
 		ws.list_dir_begin()
@@ -245,10 +269,13 @@ func _mod_files_present() -> bool:
 		while n != """":
 			if ws.current_is_dir() and FileAccess.file_exists(ws_root.path_join(n + ""/"" + MOD_ID + "".json"")):
 				ws.list_dir_end()
-				return true
+				return ws_root.path_join(n)
 			n = ws.get_next()
 		ws.list_dir_end()
-	return false
+	return """"
+
+func _mod_files_present() -> bool:
+	return _mod_dir() != """"
 
 # 错后清理:①临时文件+rename 原子替换 override.cfg ②删脚本 ③删遗留心跳文件。
 # 任何时刻被强退:2 秒内 = 零写入;①之后 = cfg 已干净,gd 文件惰性无害。
@@ -325,7 +352,7 @@ func _build_ui() -> void:
 	_step.position = Vector2(24, 8)
 	_step.add_theme_font_size_override(""font_size"", 20)
 	_step.add_theme_color_override(""font_color"", Color.WHITE)
-	_step.text = txt(""正在启动"", ""Starting"")
+	_step.text = _txt(""bar.starting"")
 	strip.add_child(_step)
 
 	_detail = Label.new()
@@ -381,7 +408,7 @@ func _set_progress(n: int, total: int, detail: String) -> void:
 	if total > 0 and n <= total:
 		var frac := FRAC_END * float(n) / float(total)
 		_fill.size.x = _track_w * frac
-		_step.text = txt(""创意工坊读取 %d/%d"", ""Reading Workshop %d/%d"") % [n, total]
+		_step.text = _txt(""bar.workshop"").replace(""{n}"", str(n)).replace(""{t}"", str(total))
 		_detail.text = detail
 
 func _poll_log() -> void:

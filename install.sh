@@ -12,8 +12,14 @@ cp src/ItsLoading/bin/Release/net9.0/ItsLoading.pck "$GAME_MODS/"
 cp src/ItsLoadingCompat/bin/Release/net9.0/ItsLoadingCompat.dll "$GAME_MODS/"
 cp src/ItsLoading/ItsLoading.json "$GAME_MODS/"
 cp src/ItsLoading/mod_image.png "$GAME_MODS/"
-mkdir -p "$GAME_MODS/localization/zhs" "$GAME_MODS/localization/eng"
-cp src/ItsLoading/localization/zhs/strings.json "$GAME_MODS/localization/zhs/"
-cp src/ItsLoading/localization/eng/strings.json "$GAME_MODS/localization/eng/"
+# 只松散复制各语言的 strings.json(gd/C# 运行时读磁盘);settings_ui.json 仅走 pck,
+# 松散放置会被游戏 mod 扫描器当 manifest 报错(2026-08-28 实测)。语言列表自动化。
+mkdir -p "$GAME_MODS/localization"
+for f in src/ItsLoading/localization/*/strings.json; do
+  lang_dir="${f%/strings.json}"
+  lang="${lang_dir##*/}"
+  mkdir -p "$GAME_MODS/localization/$lang"
+  cp "$f" "$GAME_MODS/localization/$lang/"
+done
 echo "installed to: $GAME_MODS"
 ls -la "$GAME_MODS"
