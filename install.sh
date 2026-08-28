@@ -4,7 +4,13 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 GAME_DIR="${GAME_DIR:-$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2}"
-GAME_MODS="$GAME_DIR/SlayTheSpire2.app/Contents/MacOS/mods/ItsLoading"
+# mods 目录 = 可执行文件旁的 mods(ModManager 语义)。macOS 原生版在 .app 内,
+# 其余(Windows 原生、CrossOver/Wine 瓶内)在游戏根目录。
+if [[ -d "$GAME_DIR/SlayTheSpire2.app" ]]; then
+  GAME_MODS="$GAME_DIR/SlayTheSpire2.app/Contents/MacOS/mods/ItsLoading"
+else
+  GAME_MODS="$GAME_DIR/mods/ItsLoading"
+fi
 
 mkdir -p "$GAME_MODS"
 cp src/ItsLoading/bin/Release/net9.0/ItsLoading.dll "$GAME_MODS/"

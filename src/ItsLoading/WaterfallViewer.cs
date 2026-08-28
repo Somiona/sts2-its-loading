@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Loader;
 using Godot;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Modding;
@@ -43,6 +44,7 @@ public static class WaterfallViewer
             Log.Warn("[ItsLoading] BaseLib not loaded — waterfall entry skipped");
             return;
         }
+        InstallShimResolver();
         string shimPath = Path.Combine(
             Path.GetDirectoryName(typeof(ItsLoading).Assembly.Location) ?? ".", "ItsLoadingCompat.dll");
         if (!File.Exists(shimPath))
@@ -56,6 +58,30 @@ public static class WaterfallViewer
             .Invoke(null, new object[] { ItsLoading.ModId });
         _wfRegistered = true;
         Log.Warn("[ItsLoading] waterfall entry registered in BaseLib (via shim)");
+    }
+
+    /// <summary>
+    /// 垫片依赖的显式解析兜底。游戏的 HandleAssemblyResolveFailure 只兜 sts2/0Harmony,
+    /// 垫片引用的 BaseLib 全链无人解析:AfterModLoad 早注册路径实测(Wine + 0.107.1,
+    /// 2026-08-28)JIT 编译 Entry.Register 时按全名绑定「已加载的」BaseLib 失败
+    /// (FileNotFoundException,报错穿过 Harmony/MonoMod 的 JIT 钩子)。挂 Default ALC
+    /// 的 Resolving,按简单名返回已加载实例——绑定必成,与平台/加载顺序无关;
+    /// macOS 正常路径探测本就命中,此兜底不触发,零影响。
+    /// </summary>
+    private static bool _shimResolverInstalled;
+    private static void InstallShimResolver()
+    {
+        if (_shimResolverInstalled) return;
+        _shimResolverInstalled = true;
+        AssemblyLoadContext.Default.Resolving += (alc, name) =>
+        {
+            if (name.Name != "BaseLib" && name.Name != "ItsLoading") return null;
+            Assembly loaded = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == name.Name);
+            if (loaded != null)
+                Log.Warn($"[ItsLoading] resolved {name.Name} via fallback (requested {name.FullName})");
+            return loaded;
+        };
     }
 
     /// <summary>兼容垫片回调入口(ItsLoadingCompat.Entry 经反射回调)。</summary>
@@ -77,12 +103,16 @@ public static class WaterfallViewer
                 Close();
                 return;
             }
+            // 阶段埋点:Wine 下原生崩溃无托管异常可捕(2026-08-28 实测,点开即死、
+            // "waterfall opened" 未达)。逐阶段一行日志,复现时最后一行即崩溃点。
+            Log.Warn("[ItsLoading] wf stage 1: i18n reload");
             // 玩家可能在本次会话内切换过语言(SettingsSave.Language 是实时值)——
             // 进度条阶段的表在启动时加载,瀑布图打开时重读一次(懒刷新)。
             I18n.Init();
             var tree = (SceneTree)Engine.GetMainLoop();
             Vector2 vs = tree.Root.GetVisibleRect().Size;
 
+            Log.Warn("[ItsLoading] wf stage 2: layer + dim");
             _waterfallLayer = new CanvasLayer { Layer = 1200 };
 
             var dim = new ColorRect { Color = new Color(0f, 0f, 0f, 0.92f) };
@@ -113,9 +143,11 @@ public static class WaterfallViewer
 
             if (Api.LoadingDurations.IsReady)
             {
+                Log.Warn("[ItsLoading] wf stage 3: chart build");
                 BuildWaterfallChart(_waterfallLayer, vs);
             }
 
+            Log.Warn("[ItsLoading] wf stage 4: attach to tree");
             tree.Root.AddChild(_waterfallLayer);
 
             // 输入接入游戏的热键栈(NHotkeyManager 挂在 NGame,菜单/局内常驻——设置页
@@ -126,6 +158,7 @@ public static class WaterfallViewer
             var hm = MegaCrit.Sts2.Core.Nodes.CommonUi.NHotkeyManager.Instance;
             if (hm != null)
             {
+                Log.Warn("[ItsLoading] wf stage 5: hotkey bindings");
                 hm.AddBlockingScreen(_waterfallLayer);
                 hm.PushHotkeyPressedBinding(
                     MegaCrit.Sts2.Core.ControllerInput.MegaInput.cancel, Close);
@@ -299,8 +332,15 @@ public static class WaterfallViewer
             };
             row.AddChild(barArea);
 
-            float start = (float)(s.StartMs / total);
-            float end = (float)Math.Min(1.0, (s.StartMs + s.DurationMs) / total);
+            // 数值加固:锚点必须落在 [0,1] 且非 NaN——负 StartMs(gd 锚点交接缝)或
+            // 病态时长直接进 Godot 原生布局,在 Wine 渲染栈上是潜在原生崩溃源。
+            float start = (float)Math.Clamp(s.StartMs / total, 0.0, 1.0);
+            float end = (float)Math.Clamp((s.StartMs + s.DurationMs) / total, 0.0, 1.0);
+            if (float.IsNaN(start) || float.IsNaN(end) || end < start)
+            {
+                Log.Warn($"[ItsLoading] wf skip bad span: {s.Id} start={s.StartMs:F0}ms dur={s.DurationMs:F0}ms");
+                continue;
+            }
             var bar = new ColorRect { Color = WfColor(s.Phase) };
             bar.AnchorLeft = start;
             bar.AnchorRight = Math.Max(end, start + 0.0015f);
