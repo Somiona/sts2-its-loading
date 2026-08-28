@@ -54,7 +54,7 @@ cat > "$VDF" <<EOF
   "visibility"          "0"
   "title"               "不再干等 · It's Loading"
   "description"         "启动进度条:工坊读取/模组加载/启动步骤全程可见,附带启动耗时瀑布图与主题切换。A boot progress bar + startup waterfall for Slay the Spire 2. Source: https://github.com/Somiona/sts2-its-loading"
-  "changenote"          "v$VERSION"
+  "changenote"          "v$VERSION:尝试修复windows崩溃问题"
 }
 EOF
 cat "$VDF"
