@@ -43,8 +43,15 @@ internal static class LoaderPatches
                      $"gen1={GC.CollectionCount(1) - _lastG1} " +
                      $"gen2={GC.CollectionCount(2) - _lastG2})");
         }
-        // 单次时钟读;mod 段总区间起点 + 突发期前缀补画(经 Presenter 出帧)
-        ItsLoading.Timeline.ModStarted();
+        string id = mod.manifest?.id ?? "<null>";
+        // 在真正进入昂贵初始化前提交“正在加载哪个 mod”;该状态会自然停留整个加载时长。
+        ItsLoading.Timeline.ModStarted(
+            I18n.T("bar.mods", new()
+            {
+                ["n"] = ItsLoading.Timeline.Count.ToString(),
+                ["t"] = ItsLoading.Timeline.Total.ToString(),
+            }),
+            id);
     }
 
     private static void AfterModLoad(Mod mod)

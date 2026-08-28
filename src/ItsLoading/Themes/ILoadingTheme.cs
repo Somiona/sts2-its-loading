@@ -7,6 +7,36 @@ using MegaCrit.Sts2.Core.Logging;
 
 namespace ItsLoading;
 
+/// <summary>用户可见的启动阶段。数值同时是经典主题显示的阶段序号。</summary>
+internal enum BootStage
+{
+    Workshop = 1,
+    Mods = 2,
+    Essential = 3,
+    OpeningAssets = 4,
+    MainMenuAssets = 5,
+    Intro = 6,
+    Menu = 7,
+}
+
+/// <summary>
+/// 时间线向主题发布的不可变快照。Overall 是全程进度；Local 是当前阶段进度，
+/// 负数表示该阶段没有可测总量、主题应显示不定进度。
+/// </summary>
+#nullable enable
+internal readonly record struct LoadingViewState(
+    BootStage Stage,
+    float Overall,
+    float Local,
+    string? Step,
+    string? Detail,
+    bool ForceDraw)
+{
+    internal const int StageCount = 7;
+    internal bool LocalIndeterminate => Local < 0f;
+}
+#nullable restore
+
 // ---------------------------------------------------------------- 主题缝(架构拆分 #7)
 //
 // 主题 = 启动加载指示器的一种呈现,挂在 BootTimeline.Presenter 上:
@@ -14,8 +44,8 @@ namespace ItsLoading;
 //   Present —— 就是 Presenter 目标;调用密度 = 真实加载活动密度(诚实动画,见 CONTEXT.md)
 //   Retire  —— 菜单就绪 + 2s 弥留后由编排层调用;gd splash 的 takeover 不归主题管
 // 刻度数学、span 记录全部在 BootTimeline——主题只管"长什么样"。
-// v1 边界:pre-C# 段(0→0.25)恒由 gd splash 以经典条外观呈现,不随主题变化;
-// 将来若主题需要 frame 0 生效,再扩展 gd 侧渲染。
+// 经典主题正常路径由帧 0 gd 节点持续呈现;本接口同时保留 C# ClassicBar 兜底
+// (首装/脚本协议不匹配),二者消费同一 LoadingViewState。
 
 /// <summary>加载指示器主题接口。</summary>
 #nullable enable
@@ -24,8 +54,8 @@ internal interface ILoadingTheme
     /// <summary>建立 UI(在 Init 的 build bar 步骤调用;此时 BootSplash.Install 已完成)。</summary>
     void Build();
 
-    /// <summary>呈现一次进度(签名即 BootTimeline.Presenter;step/detail 可为 null = 不动文案)。</summary>
-    void Present(float frac, string? step, string? detail, bool forceDraw);
+    /// <summary>呈现一次完整不可变快照。</summary>
+    void Present(LoadingViewState state);
 
     /// <summary>退休:置死亡标志(挡住条移除后仍可能触发的 postfix)+ 释放自身节点。</summary>
     void Retire();

@@ -20,7 +20,7 @@ namespace ItsLoading;
 /// 伴生模块:
 ///   BootTimeline.cs     —— 启动时间线(#3 深模块:刻度表 + span 记录 + 冻结;钩子经它推进度)
 ///   Patches/            —— Harmony 补丁族(#4:loader / boot phases / mod icon)
-///   Themes/             —— 主题缝(#7:ILoadingTheme + 注册表;经典条为默认主题)
+///   Themes/             —— 呈现缝(持久 gd 经典双条 + 首启 C# 经典双条兜底)
 ///   BootSplash.cs       —— gd splash 自注入/交接/延迟回收(帧 0→0.25 段的呈现)
 ///   WaterfallViewer.cs  —— 瀑布图查看器(菜单就绪后的调试 UI)
 /// </summary>
@@ -48,10 +48,17 @@ public static class ItsLoading
         // (Presenter 在 build bar 步骤接线到当前主题)
         Timeline = new BootTimeline(() => (long)Time.GetTicksMsec(), () => Sw.ElapsedTicks);
         Run("ensure boot splash installed", BootSplash.Install);
-        Run("ensure first in load order", EnsureFirstInLoadOrder);
-        // 顺序关键:先建条再交接——C# 条(999)直接叠在 gd 条(998)之上,不隐藏 gd splash
-        // (隐藏 CanvasLayer 会触发渲染状态变更 → 黑屏间隙,详见 BootSplash.Handoff 注释)
+        int processed = 1;
+        Run("ensure first in load order", () => processed = EnsureFirstInLoadOrder());
+        string modStep = processed >= total
+            ? I18n.T("bar.modsDone")
+            : I18n.T("bar.mods", new() { ["n"] = processed.ToString(), ["t"] = total.ToString() });
+        // 先建立时间线快照再建主题:gd 桥/首启 C# 兜底都从同一份初始状态绘制,
+        // 不再短暂硬编码成 1/N。
+        Timeline.BeginMods(total, processed, modStep);
+        // 正常路径复用帧 0 gd 节点;首启/脚本版本不匹配才建 C# ClassicBar 兜底。
         Run("build bar", BuildTheme);
+        Timeline.Replay();
         Run("boot splash handoff", BootSplash.Handoff);
         // 原子交接:此刻出帧 = 一帧内完成条与条的切换。
         // 连画 3 次:主线程刚进入同步突发时,首次提交可能被 MoltenVK 丢弃
@@ -64,11 +71,7 @@ public static class ItsLoading
         Run("patch loader", LoaderPatches.Install);
         Run("patch boot phases", BootPhasePatches.Install);
         Run("patch mod info icon", ModInfoIconPatches.Install);
-        Log.Warn($"[ItsLoading] watching {total} mods");
-        // todo#9:走 I18n(此前硬编码中文,英文玩家从首帧 ForceDraw 起就看中文;
-        // total==1 时中文停留整条进度条生命周期)
-        Timeline.BeginMods(total,
-            I18n.T("bar.mods", new() { ["n"] = "1", ["t"] = total.ToString() }));
+        Log.Warn($"[ItsLoading] watching {total} mods ({processed} already processed)");
     }
 
     /// <summary>吞异常守卫:启动期任何一步失败只记日志,绝不中断游戏启动。</summary>
@@ -86,10 +89,13 @@ public static class ItsLoading
 
     // ================================================================ 主题接线
 
-    /// <summary>构建当前主题并接上时间线的呈现(Init 的 build bar 步骤)。</summary>
+    /// <summary>
+    /// 构建主题并接上时间线的呈现(Init 的 build bar 步骤)。
+    /// 兼容的 gd 节点在场 → 作为唯一全程视图；否则构建同规格 ClassicBar 兜底。
+    /// </summary>
     private static void BuildTheme()
     {
-        Theme = ThemeRegistry.BuildActive();
+        Theme = GdBridgeBar.TryBuild() ?? ThemeRegistry.BuildActive();
         Timeline.Presenter = Theme.Present;
     }
 
@@ -117,39 +123,49 @@ public static class ItsLoading
     /// 不改 _size/_version——枚举器按 _items[_index] 现场取值,idx 之后的
     /// 未枚举元素原位不动,循环照常走完,Initialize 结尾照常按新顺序重建。
     /// </summary>
-    private static void EnsureFirstInLoadOrder()
+    private static int EnsureFirstInLoadOrder()
     {
         int loadedBeforeUs = ModManager.GetLoadedMods().Count();
-        var mods = AccessTools.Field(typeof(ModManager), "_mods").GetValue(null)
+        int idx = -1;
+        for (int i = 0; i < ModManager.Mods.Count; i++)
+        {
+            if (ModManager.Mods[i].manifest?.id == ModId)
+            {
+                idx = i;
+                break;
+            }
+        }
+        int processed = idx >= 0 ? idx + 1 : Math.Max(1, loadedBeforeUs + 1);
+        var mods = AccessTools.Field(typeof(ModManager), "_mods")?.GetValue(null)
             as System.Collections.Generic.List<Mod>;
         if (mods == null)
         {
             Log.Warn("[ItsLoading] _mods not accessible — load order left as-is");
-            return;
+            return processed;
         }
-        int idx = mods.FindIndex(m => m.manifest?.id == ModId);
-        if (idx < 0) return;
+        if (idx < 0) return processed;
         if (idx == 0)
         {
-            if (loadedBeforeUs > 1)
+            if (loadedBeforeUs > 0)
             {
-                Log.Warn($"[ItsLoading] first in list but {loadedBeforeUs - 1} mods loaded before us?");
+                Log.Warn($"[ItsLoading] first in list but {loadedBeforeUs} mods loaded before us?");
             }
-            return;
+            return processed;
         }
         // 不用 RemoveAt+Insert(枚举中会崩),直接挪内部数组;内部结构不符合
         // 预期(未来 .NET 改字段)则放弃重排——优雅降级,绝不让游戏崩。
-        var items = AccessTools.Field(typeof(System.Collections.Generic.List<Mod>), "_items")
+        var items = AccessTools.Field(typeof(System.Collections.Generic.List<Mod>), "_items")?
             .GetValue(mods) as Mod[];
         if (items == null || idx >= items.Length)
         {
             Log.Warn("[ItsLoading] List<T> internals not as expected — load order left as-is");
-            return;
+            return processed;
         }
         var me = items[idx];
         Array.Copy(items, 0, items, 1, idx);
         items[0] = me;
         Log.Warn($"[ItsLoading] moved self to load order #0 (was #{idx + 1}, " +
                  $"{loadedBeforeUs} mods loaded before us) — full timing coverage from next boot");
+        return processed;
     }
 }

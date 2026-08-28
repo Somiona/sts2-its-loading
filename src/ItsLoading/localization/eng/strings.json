@@ -1,5 +1,6 @@
 {
   "bar.starting": "Starting",
+  "bar.stage": "Stage {n}/{t} · {name}",
   "bar.workshop": "Reading Workshop {n}/{t}",
   "bar.mods": "Loading mods {n}/{t}",
   "bar.modsDone": "Mods loaded",

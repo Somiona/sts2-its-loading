@@ -7,15 +7,14 @@ using Xunit;
 // 启动时间线数学的离线回归:这里每一条断言对应历史上真出过 bug 的区域——
 // mod 段公式、步骤分数与相邻差分、会话插值与空会话(todo#5)、锚点兜底(todo#6)。
 
-public sealed class Spy : List<(float Frac, string Step, string Detail, bool Force)>
+internal sealed class Spy : List<LoadingViewState>
 {
-    public Action<float, string, string, bool> AsPresenter() =>
-        (f, s, d, fd) => Add((f, s, d, fd));
+    public Action<LoadingViewState> AsPresenter() => Add;
 
-    public (float Frac, string Step, string Detail, bool Force) Last => this[^1];
+    public LoadingViewState Last => this[^1];
 }
 
-public sealed class ScriptedClock
+internal sealed class ScriptedClock
 {
     public long EngineMsec;
     public long Ticks;
@@ -38,17 +37,19 @@ public class BootTimelineTests
     private static Func<int, string> Text(string prefix) => n => $"{prefix}{n}";
 
     [Fact]
-    public void BeginMods_presents_quarter_with_empty_detail()
+    public void BeginMods_presents_overall_and_local_progress()
     {
         var clock = new ScriptedClock();
         var spy = new Spy();
-        clock.MakeTimeline(spy).BeginMods(8, "Loading mods 1/8");
+        clock.MakeTimeline(spy).BeginMods(8, 1, "Loading mods 1/8");
 
         var p = Assert.Single(spy);
-        Assert.Equal(0.25f, p.Frac);
+        Assert.Equal(0.25f + 0.35f / 8f, p.Overall, 5);
+        Assert.Equal(1f / 8f, p.Local);
+        Assert.Equal(BootStage.Mods, p.Stage);
         Assert.Equal("Loading mods 1/8", p.Step);
         Assert.Equal("", p.Detail);
-        Assert.True(p.Force);
+        Assert.False(p.ForceDraw);
     }
 
     [Fact]
@@ -56,24 +57,39 @@ public class BootTimelineTests
     {
         var clock = new ScriptedClock();
         var tl = clock.MakeTimeline(new Spy());
-        tl.BeginMods(0, "x");
+        tl.BeginMods(0, 1, "x");
         Assert.Equal(1, tl.Total);
     }
 
     [Fact]
-    public void ModStarted_presents_same_fraction_without_touching_labels()
+    public void BeginMods_accounts_for_mods_processed_before_itsloading()
     {
         var clock = new ScriptedClock();
         var spy = new Spy();
         var tl = clock.MakeTimeline(spy);
-        tl.BeginMods(4, "mods");
 
-        tl.ModStarted();
+        tl.BeginMods(7, 5, "Loading mods 5/7");
 
-        Assert.Equal(0.25f, spy.Last.Frac);
-        Assert.Null(spy.Last.Step);   // 不动文案,只触发补画
-        Assert.Null(spy.Last.Detail);
-        Assert.True(spy.Last.Force);
+        Assert.Equal(5, tl.Count);
+        Assert.Equal(5f / 7f, spy.Last.Local, 5);
+        Assert.Equal(0.25f + 0.35f * (5f / 7f), spy.Last.Overall, 5);
+    }
+
+    [Fact]
+    public void ModStarted_presents_current_mod_before_expensive_work()
+    {
+        var clock = new ScriptedClock();
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        tl.BeginMods(4, 1, "mods");
+
+        tl.ModStarted("mods", "A");
+
+        Assert.Equal(0.25f + 0.35f / 4f, spy.Last.Overall, 5);
+        Assert.Equal(0.25f, spy.Last.Local);
+        Assert.Equal("mods", spy.Last.Step);
+        Assert.Equal("A", spy.Last.Detail);
+        Assert.True(spy.Last.ForceDraw);
         Assert.Equal(1, tl.PrefixCalls);
     }
 
@@ -83,19 +99,25 @@ public class BootTimelineTests
         var clock = new ScriptedClock { EngineMsec = 10_000 };
         var spy = new Spy();
         var tl = clock.MakeTimeline(spy);
-        tl.BeginMods(4, "mods"); // 自身=1,再装 3 个到 4
+        tl.BeginMods(4, 1, "mods"); // 自身=1,再装 3 个到 4
 
+        tl.ModStarted("mods", "A");
         Assert.Equal(2, tl.ModLoaded("A", "Loaded", Text("A-"), "dA", "done", n => $"fin{n}"));
-        Assert.Equal(0.25f + 0.35f * (2 / 4f), spy.Last.Frac); // 0.425
+        Assert.Equal(0.25f + 0.35f * (2 / 4f), spy.Last.Overall, 5); // 0.425
+        Assert.Equal(0.5f, spy.Last.Local);
         Assert.Equal("A-2", spy.Last.Step); // 计数文案由时间线注入 n
         Assert.Equal("dA", spy.Last.Detail);
+        Assert.False(spy.Last.ForceDraw);
 
+        tl.ModStarted("mods", "B");
         Assert.Equal(3, tl.ModLoaded("B", "Loaded", Text("B-"), "dB", "done", n => $"fin{n}"));
-        Assert.Equal(0.25f + 0.35f * (3 / 4f), spy.Last.Frac);
+        Assert.Equal(0.25f + 0.35f * (3 / 4f), spy.Last.Overall, 5);
 
+        tl.ModStarted("mods", "C");
         Assert.Equal(4, tl.ModLoaded("C", "Loaded", Text("C-"), "dC", "done", n => $"fin{n}"));
         Assert.True(tl.ModsDone);
-        Assert.Equal(0.60f, spy.Last.Frac);            // 完成呈现
+        Assert.Equal(0.60f, spy.Last.Overall);            // 完成呈现
+        Assert.Equal(1f, spy.Last.Local);
         Assert.Equal("done", spy.Last.Step);
         Assert.Equal("fin4", spy.Last.Detail);          // 完成文案带计数
 
@@ -109,9 +131,9 @@ public class BootTimelineTests
     {
         var clock = new ScriptedClock { EngineMsec = 10_000 };
         var tl = clock.MakeTimeline(new Spy());
-        tl.BeginMods(2, "m");
+        tl.BeginMods(2, 1, "m");
         clock.Ticks = clock.MsToTicks(1_000);           // prefix 时刻(ticks 1000ms)
-        tl.ModStarted();
+        tl.ModStarted("m", "A");
         clock.Ticks = clock.MsToTicks(1_300);           // postfix 时刻
         tl.ModLoaded("A", "Loaded", Text("x"), "d", "done", n => "f");
 
@@ -132,13 +154,15 @@ public class BootTimelineTests
 
         clock.Ticks = clock.MsToTicks(2_000);
         tl.StepStarted("step.atlas", "图集加载", "+2000ms");
-        Assert.Equal(0.615f, spy.Last.Frac);
+        Assert.Equal(0.600f, spy.Last.Overall);
+        Assert.Equal(0f, spy.Last.Local);
         var first = Assert.Single(tl.StepSpans);
         Assert.Equal(0, first.DurationMs);              // 开启时未知时长
 
         clock.Ticks = clock.MsToTicks(2_050);
         tl.StepStarted("step.loc", "本地化初始化", "+2050ms");
-        Assert.Equal(0.625f, spy.Last.Frac);
+        Assert.Equal(0.615f, spy.Last.Overall);
+        Assert.Equal(0.25f, spy.Last.Local);
         Assert.Equal(2, tl.StepSpans.Count);
         Assert.Equal(50.0, tl.StepSpans[0].DurationMs, 1); // 相邻差分收尾
         Assert.Equal(0, tl.StepSpans[1].DurationMs);
@@ -150,12 +174,30 @@ public class BootTimelineTests
         var clock = new ScriptedClock();
         var spy = new Spy();
         var tl = clock.MakeTimeline(spy);
-        tl.BeginMods(2, "m");
+        tl.BeginMods(2, 1, "m");
 
         tl.StepStarted("step.nope", "x", "y");
 
         Assert.Single(spy);                              // 只有 BeginMods 那次
         Assert.Empty(tl.StepSpans);
+    }
+
+    [Fact]
+    public void EssentialCompleted_closes_last_step_at_essential_boundary()
+    {
+        var clock = new ScriptedClock { EngineMsec = 10_000 };
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        clock.Ticks = clock.MsToTicks(2_000);
+        tl.StepStarted("step.ids", "ids", "");
+
+        clock.Ticks = clock.MsToTicks(2_040);
+        tl.EssentialCompleted();
+
+        Assert.Equal(40.0, Assert.Single(tl.StepSpans).DurationMs, 1);
+        Assert.Equal(0.66f, spy.Last.Overall);
+        Assert.Equal(1f, spy.Last.Local);
+        Assert.Equal(BootStage.Essential, spy.Last.Stage);
     }
 
     [Fact]
@@ -168,14 +210,15 @@ public class BootTimelineTests
 
         Assert.True(tl.TracksSession("IntroLogo"));
         clock.Ticks = clock.MsToTicks(3_000);
-        tl.SessionAdvanced(session, "IntroLogo", 5, 5, "assets", t => $"{5}/{t}");
-        Assert.Equal(0.66f + (0.70f - 0.66f) * 0.5f, spy.Last.Frac, 5); // 中点 0.68
-        Assert.Equal("5/10", spy.Last.Detail);
-        Assert.False(spy.Last.Force);                    // 会话事件不强制出帧
+        tl.SessionAdvanced(session, "IntroLogo", 5, 5, "logo.png", "assets", (t, item) => $"{5}/{t} · {item}");
+        Assert.Equal(0.66f + (0.70f - 0.66f) * 0.5f, spy.Last.Overall, 5); // 中点 0.68
+        Assert.Equal(0.5f, spy.Last.Local, 5);
+        Assert.Equal("5/10 · logo.png", spy.Last.Detail);
+        Assert.False(spy.Last.ForceDraw);                    // 会话事件不强制出帧
 
         clock.Ticks = clock.MsToTicks(3_400);
-        tl.SessionAdvanced(session, "IntroLogo", 10, 0, "assets", t => $"{10}/{t}");
-        Assert.Equal(0.70f, spy.Last.Frac, 5);
+        tl.SessionAdvanced(session, "IntroLogo", 10, 0, null, "assets", (t, item) => $"{10}/{t} · {item}");
+        Assert.Equal(0.70f, spy.Last.Overall, 5);
         var span = Assert.Single(tl.SessionSpans);
         Assert.Equal("IntroLogo", span.Id);
         Assert.Equal(400.0, span.DurationMs, 1);
@@ -188,11 +231,11 @@ public class BootTimelineTests
         var clock = new ScriptedClock();
         var spy = new Spy();
         var tl = clock.MakeTimeline(spy);
-        tl.BeginMods(2, "m");
+        tl.BeginMods(2, 1, "m");
 
-        tl.SessionAdvanced(new object(), "IntroLogo", 0, 0, "a", t => $"0/{t}");
+        tl.SessionAdvanced(new object(), "IntroLogo", 0, 0, null, "a", (t, item) => $"0/{t}");
 
-        Assert.Equal(0.70f, spy.Last.Frac, 5);           // todo#5:0/0 按已完成,不产生 NaN
+        Assert.Equal(0.70f, spy.Last.Overall, 5);           // todo#5:0/0 按已完成,不产生 NaN
         Assert.Empty(tl.SessionSpans);                   // Total=0 不记 span
     }
 
@@ -202,17 +245,34 @@ public class BootTimelineTests
         var clock = new ScriptedClock();
         var spy = new Spy();
         var tl = clock.MakeTimeline(spy);
-        tl.BeginMods(2, "m");
+        tl.BeginMods(2, 1, "m");
         int before = spy.Count;
 
         Assert.False(tl.TracksSession("SomeRoomLoad"));  // 游戏内会话:钩子连反射读都省了
-        tl.SessionAdvanced(new object(), "SomeRoomLoad", 1, 1, "a", t => "x");
+        tl.SessionAdvanced(new object(), "SomeRoomLoad", 1, 1, null, "a", (t, item) => "x");
         Assert.Equal(before, spy.Count);
 
         tl.MenuReady("done", "123ms");
         Assert.False(tl.TracksSession("IntroLogo"));     // 冻结后
-        tl.SessionAdvanced(new object(), "IntroLogo", 1, 0, "a", t => "x");
+        tl.SessionAdvanced(new object(), "IntroLogo", 1, 0, null, "a", (t, item) => "x");
         Assert.Equal(before + 1, spy.Count);             // 只有 MenuReady 那次
+    }
+
+    [Fact]
+    public void Freeze_rejects_late_steps_and_waypoints()
+    {
+        var clock = new ScriptedClock();
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        tl.MenuReady("done", "x");
+        int before = spy.Count;
+
+        tl.StepStarted("step.atlas", "late", "late");
+        tl.Waypoint(BootWaypoint.MenuLoad, "late", "late");
+
+        Assert.Equal(before, spy.Count);
+        Assert.Empty(tl.StepSpans);
+        Assert.Equal(1f, tl.Current.Overall);
     }
 
     [Fact]
@@ -268,7 +328,7 @@ public class BootTimelineTests
         clock.Ticks = clock.MsToTicks(2_080);
         tl.MenuReady("Ready", "80ms");
 
-        Assert.Equal(1.0f, spy.Last.Frac);
+        Assert.Equal(1.0f, spy.Last.Overall);
         Assert.Equal("Ready", spy.Last.Step);
         Assert.Equal(80.0, tl.StepSpans[0].DurationMs, 1); // 末步骤收尾
     }
@@ -280,15 +340,16 @@ public class BootTimelineTests
         var spy = new Spy();
         var tl = clock.MakeTimeline(spy);
 
-        tl.Waypoint(BootWaypoint.Logo, "logo", "");
-        Assert.Equal(0.82f, spy.Last.Frac);
-        tl.Waypoint(BootWaypoint.MenuLoad, "menu", "");
-        Assert.Equal(0.88f, spy.Last.Frac);
         tl.Waypoint(BootWaypoint.MainMenu, "opening", "+1ms");
         tl.Waypoint(BootWaypoint.MainMenu, "opening", "+2ms"); // 二次被去重
+        Assert.Equal(0.66f, spy.Last.Overall);
+        tl.Waypoint(BootWaypoint.Logo, "logo", "");
+        Assert.Equal(0.82f, spy.Last.Overall);
+        tl.Waypoint(BootWaypoint.MenuLoad, "menu", "");
+        Assert.Equal(0.88f, spy.Last.Overall);
 
         Assert.Equal(3, spy.Count);
-        Assert.Equal(0.66f, spy.Last.Frac);
+        Assert.Equal(BootStage.Menu, spy.Last.Stage);
     }
 
     [Fact]
@@ -298,13 +359,13 @@ public class BootTimelineTests
         var tl = clock.MakeTimeline(new Spy());
         Assert.Null(tl.BootSummary());
 
-        tl.BeginMods(2, "m");
+        tl.BeginMods(3, 1, "m");
         clock.Ticks = clock.MsToTicks(100);
-        tl.ModStarted();
+        tl.ModStarted("m", "Slow");
         clock.Ticks = clock.MsToTicks(400);
         tl.ModLoaded("Slow", "Loaded", Text("x"), "d", "done", n => "f");
         clock.Ticks = clock.MsToTicks(500);
-        tl.ModStarted();
+        tl.ModStarted("m", "Fast");
         clock.Ticks = clock.MsToTicks(510);
         tl.ModLoaded("Fast", "Loaded", Text("x"), "d", "done", n => "f");
 

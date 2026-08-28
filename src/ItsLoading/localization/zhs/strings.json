@@ -1,5 +1,6 @@
 {
   "bar.starting": "正在启动",
+  "bar.stage": "阶段 {n}/{t} · {name}",
   "bar.workshop": "创意工坊读取 {n}/{t}",
   "bar.mods": "模组加载 {n}/{t}",
   "bar.modsDone": "模组加载完成",

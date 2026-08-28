@@ -15,7 +15,8 @@ namespace ItsLoading;
 //   · 全部 span 记录(Api.LoadingDurations 是它的只读查询面)
 //   · 锚点与时钟换算(EngineOffset、BootAnchor、TotalBootMs)
 //   · 冻结语义(菜单就绪后数据封存)
-// 呈现为推模型:每个事件回调一次 Presenter——这也是将来主题缝(#7)的时钟
+// 呈现为推模型:每个事件发布一份完整 LoadingViewState(全程 + 当前阶段双进度)
+// 给 Presenter——这也是主题缝的时钟
 // (诚实动画:Present 调用密度 = 真实加载活动密度,见 CONTEXT.md)。
 // 文案由钩子解析后传入(I18n 不进本类);纯 BCL、双时钟注入 → 可离线单测(tests/)。
 
@@ -24,43 +25,49 @@ internal enum BootWaypoint { Logo, MenuLoad, MainMenu }
 
 internal sealed class BootTimeline
 {
-    // ---- 刻度表(单一进度刻度 0→1:工坊 0-0.25 / mod 加载 0.25-0.60 / Essential 0.60-0.88 / 菜单就绪 0.88-1.0) ----
+    // ---- 全程刻度表(主题另有当前阶段 0→1 局部条) ----
+
+    internal const float WorkshopEnd = 0.25f;
+    internal const float ModsEnd = 0.60f;
+    internal const float EssentialEnd = 0.66f;
+    internal const float OpeningAssetsEnd = 0.70f;
+    internal const float MainMenuAssetsEnd = 0.82f;
+    internal const float IntroEnd = 0.88f;
 
     /// <summary>启动子步骤键 → 分数。ItsLoading 侧只保留 patch 定位(Type/Method),分数真源在此。</summary>
-    private static readonly Dictionary<string, float> StepFractions = new()
+    private static readonly Dictionary<string, (float Overall, float Local)> StepFractions = new()
     {
-        { "step.atlas", 0.615f },
-        { "step.loc", 0.625f },
-        { "step.modeldb", 0.635f },
-        { "step.ids", 0.645f },
-        { "step.preload", 0.655f },
+        { "step.atlas", (ModsEnd, 0.00f) },
+        { "step.loc", (0.615f, 0.25f) },
+        { "step.modeldb", (0.630f, 0.50f) },
+        { "step.ids", (0.645f, 0.75f) },
     };
 
     /// <summary>
-    /// 启动期的会话名 → 单条进度刻度上的子区间。游戏内会话(房间/角色)不在此表,自动忽略。
+    /// 启动期的会话名 → 阶段 + 全程条子区间。游戏内会话(房间/角色)不在此表,自动忽略。
     /// 注意没有 "MainMenu" 会话:游戏唯一创建它的 PreloadManager.LoadMainMenuAssets 零调用者,
     /// 菜单资产实际由 "Common" 会话加载(LoadCommonAndMainMenuAssets),但那发生在
     /// ExecuteDeferred(=条的 1.0 完成点与 Freeze 点)之后、条 2 秒弥留期内——若映射它,
     /// 会把已显示 1.0「完成」的条拽回 0.88。启动边界定在菜单就绪,延迟资产
     /// 属启动后后台工作,不进条也不进冻结的 Api 数据(todo#4,2026-08-27)。
     /// </summary>
-    private static readonly Dictionary<string, (float Start, float End)> SessionRanges = new()
+    private static readonly Dictionary<string, (BootStage Stage, float Start, float End)> SessionRanges = new()
     {
-        { "IntroLogo", (0.66f, 0.70f) },
-        { "MainMenuEssentials", (0.70f, 0.82f) },
+        { "IntroLogo", (BootStage.OpeningAssets, EssentialEnd, OpeningAssetsEnd) },
+        { "MainMenuEssentials", (BootStage.MainMenuAssets, OpeningAssetsEnd, MainMenuAssetsEnd) },
     };
 
     private static readonly Dictionary<BootWaypoint, float> WaypointFractions = new()
     {
-        { BootWaypoint.Logo, 0.82f },
-        { BootWaypoint.MenuLoad, 0.88f },
-        { BootWaypoint.MainMenu, 0.66f },
+        { BootWaypoint.Logo, MainMenuAssetsEnd },
+        { BootWaypoint.MenuLoad, IntroEnd },
+        { BootWaypoint.MainMenu, EssentialEnd },
     };
 
     // ---- 状态(原 Recorder 全部并入;主线程独占写入) ----
 
-    /// <summary>呈现回调(推模型):(frac, step, detail, forceDraw) → SetProgress;step/detail 可为 null(不动文案)。</summary>
-    public Action<float, string?, string?, bool>? Presenter;
+    /// <summary>呈现回调(推模型):主题只消费完整快照。</summary>
+    public Action<LoadingViewState>? Presenter;
 
     private readonly Func<long> _engineMsec;
     private readonly Func<long> _swTicks;
@@ -68,7 +75,7 @@ internal sealed class BootTimeline
 
     internal bool Frozen { get; private set; }
     internal bool ModsDone { get; private set; }
-    internal int Count { get; private set; } = 1; // 本 mod 自己算第 1 个
+    internal int Count { get; private set; } = 1;
     internal int Total { get; private set; } = 1;
     internal int PrefixCalls;                    // 诊断:prefix 实际触发次数
     internal double TotalBootMs => _totalBootMs;
@@ -77,7 +84,8 @@ internal sealed class BootTimeline
     private long _bootAnchorMsec = -1;
     private long _modStartTicks, _firstModTicks = -1, _lastModTicks, _lastStepTicks = -1;
     private bool _menuHandled;
-    private float _frac = 0.25f;
+    private LoadingViewState _current = new(BootStage.Mods, WorkshopEnd, 0f, null, null, false);
+    internal LoadingViewState Current => _current;
 
     internal readonly List<Api.LoadSpan> ModSpans = new(capacity: 64);
     internal readonly List<Api.LoadSpan> StepSpans = new(capacity: 16);
@@ -92,6 +100,7 @@ internal sealed class BootTimeline
         public int Total;
         public long FirstTicks, LastTicks;
         public bool Recorded;
+        public string? CurrentItem;
     }
 
     public BootTimeline(Func<long> engineMsec, Func<long> swTicks)
@@ -105,29 +114,46 @@ internal sealed class BootTimeline
     private static double SwTicksToMs => 1000.0 / Stopwatch.Frequency;
     private double ToEngineMs(long swTicks) => swTicks * SwTicksToMs + _engineOffsetMs;
 
-    private void Present(float frac, string? step, string? detail, bool forceDraw)
+    private void Present(BootStage stage, float overall, float local,
+        string? step, string? detail, bool forceDraw)
     {
-        _frac = frac;
-        Presenter?.Invoke(frac, step, detail, forceDraw);
+        // 阶段和全程条都永不倒退；阶段内条允许在合法阶段切换时重置。
+        if (stage < _current.Stage) return;
+        overall = Math.Max(_current.Overall, Math.Clamp(overall, 0f, 1f));
+        if (local >= 0f) local = Math.Clamp(local, 0f, 1f);
+        _current = new LoadingViewState(
+            stage, overall, local,
+            step ?? _current.Step,
+            detail ?? _current.Detail,
+            forceDraw);
+        Presenter?.Invoke(_current);
     }
+
+    internal void Replay(bool forceDraw = true) =>
+        Presenter?.Invoke(_current with { ForceDraw = forceDraw });
 
     // ---- 写缝:钩子报事实 ----
 
-    /// <summary>mod 段开始(Init 末):呈现 0.25 起点。</summary>
-    internal void BeginMods(int total, string stepText)
+    /// <summary>mod 段开始。processed 含本 mod 与本次启动中已经先于它处理的 mod。</summary>
+    internal void BeginMods(int total, int processed, string stepText)
     {
         Total = Math.Max(1, total);
-        Present(0.25f, stepText, "", true);
+        Count = Math.Clamp(processed, 1, Total);
+        float local = Count / (float)Total;
+        if (Count >= Total) ModsDone = true;
+        Present(BootStage.Mods, WorkshopEnd + (ModsEnd - WorkshopEnd) * local,
+            local, stepText, "", false);
     }
 
-    /// <summary>TryLoadMod prefix:记 mod 段起点;present 同分数触发补画(presenter 内 ForceDraw)。</summary>
-    internal void ModStarted()
+    /// <summary>TryLoadMod prefix:在昂贵初始化前显示当前 mod，并强制提交一次。</summary>
+    internal void ModStarted(string stepText, string id)
     {
+        if (Frozen) return;
         PrefixCalls++;
         _modStartTicks = _swTicks();
         if (_firstModTicks < 0) _firstModTicks = _modStartTicks;
-        // 突发期前缀补画:压缩"首次有效出帧"前的盲区(同 first paint 的冗余提交理由)
-        Presenter?.Invoke(_frac, null, null, true);
+        Present(BootStage.Mods, _current.Overall, Count / (float)Total,
+            stepText, id, true);
     }
 
     /// <summary>
@@ -138,24 +164,38 @@ internal sealed class BootTimeline
     internal int ModLoaded(string id, string state, Func<int, string> stepText, string detail,
         string doneStepText, Func<int, string> doneDetail)
     {
+        if (Frozen) return Count;
         long nowTicks = _swTicks();
         _lastModTicks = nowTicks;
         Count++;
         // 耗时记录(prefix→postfix 真实区间,亚毫秒精度)
-        ModSpans.Add(new Api.LoadSpan(
-            id, Api.LoadPhase.ModLoad,
-            ToEngineMs(_modStartTicks), (nowTicks - _modStartTicks) * SwTicksToMs, state));
+        lock (ModSpans)
+        {
+            ModSpans.Add(new Api.LoadSpan(
+                id, Api.LoadPhase.ModLoad,
+                ToEngineMs(_modStartTicks), (nowTicks - _modStartTicks) * SwTicksToMs, state));
+        }
 
-        Present(0.25f + 0.35f * (Count / (float)Total), stepText(Count), detail, true);
+        float local = Count / (float)Total;
+        // postfix 只更新状态；下一个 prefix 会把结果与下一个 mod 名一起提交，
+        // 从而把同步突发期的强制绘制次数减半。最后一个 mod 仍在下方强制提交。
+        Present(BootStage.Mods, WorkshopEnd + (ModsEnd - WorkshopEnd) * local, local,
+            stepText(Count), detail, false);
 
         if (Count >= Total && !ModsDone)
         {
             ModsDone = true;
-            PhaseSpans.Add(new Api.LoadSpan(
-                "phase.mod_load", Api.LoadPhase.ModLoad,
-                ToEngineMs(_firstModTicks), (_lastModTicks - _firstModTicks) * SwTicksToMs,
-                $"{Count} mods"));
-            Present(0.60f, doneStepText, doneDetail(Count), true);
+            if (_firstModTicks >= 0)
+            {
+                lock (PhaseSpans)
+                {
+                    PhaseSpans.Add(new Api.LoadSpan(
+                        "phase.mod_load", Api.LoadPhase.ModLoad,
+                        ToEngineMs(_firstModTicks), (_lastModTicks - _firstModTicks) * SwTicksToMs,
+                        $"{Count} mods"));
+                }
+            }
+            Present(BootStage.Mods, ModsEnd, 1f, doneStepText, doneDetail(Count), true);
         }
         return Count;
     }
@@ -163,12 +203,25 @@ internal sealed class BootTimeline
     /// <summary>启动子步骤 prefix:查分数表、相邻差分收尾上一 step span。未知键忽略(对齐原 StepMap 早退)。</summary>
     internal void StepStarted(string labelKey, string stepText, string detail)
     {
-        if (!StepFractions.TryGetValue(labelKey, out var frac)) return;
+        if (Frozen) return;
+        if (!StepFractions.TryGetValue(labelKey, out var progress)) return;
         long nowTicks = _swTicks();
         ClosePendingStep(nowTicks);
         _lastStepTicks = nowTicks;
-        StepSpans.Add(new Api.LoadSpan(labelKey, Api.LoadPhase.BootStep, ToEngineMs(nowTicks), 0, ""));
-        Present(frac, stepText, detail, true);
+        lock (StepSpans)
+        {
+            StepSpans.Add(new Api.LoadSpan(labelKey, Api.LoadPhase.BootStep, ToEngineMs(nowTicks), 0, ""));
+        }
+        Present(BootStage.Essential, progress.Overall, progress.Local, stepText, detail, true);
+    }
+
+    /// <summary>ExecuteEssential postfix:准确收尾最后一个同步步骤，不把后续资产/Logo 时间算进 InitIds。</summary>
+    internal void EssentialCompleted()
+    {
+        if (Frozen) return;
+        ClosePendingStep(_swTicks());
+        _lastStepTicks = -1;
+        Present(BootStage.Essential, EssentialEnd, 1f, null, null, true);
     }
 
     /// <summary>钩子先用它过滤:未知会话/已冻结时跳过反射读(游戏内房间会话每帧都来,必须廉价)。</summary>
@@ -178,13 +231,14 @@ internal sealed class BootTimeline
     /// 资产会话 postfix:会话子区间插值 + 完成时记 span。计数文案走 Func&lt;int,string&gt;(stat.Total 在本类)。
     /// </summary>
     internal void SessionAdvanced(object session, string name, int loaded, int remaining,
-        string stepText, Func<int, string> detail)
+        string? currentItem, string stepText, Func<int, string?, string> detail)
     {
         if (Frozen) return;
         if (!SessionRanges.TryGetValue(name, out var range)) return;
 
         long nowTicks = _swTicks();
         SessionStat stat = _sessionStats.GetValue(session, _ => new SessionStat());
+        if (!string.IsNullOrEmpty(currentItem)) stat.CurrentItem = currentItem;
         if (stat.Total <= 0)
         {
             stat.Total = loaded + remaining;
@@ -194,28 +248,39 @@ internal sealed class BootTimeline
         if (stat.Total > 0 && remaining == 0 && !stat.Recorded)
         {
             stat.Recorded = true;
-            SessionSpans.Add(new Api.LoadSpan(
-                name, Api.LoadPhase.AssetSession,
-                ToEngineMs(stat.FirstTicks), (stat.LastTicks - stat.FirstTicks) * SwTicksToMs,
-                $"{loaded}/{stat.Total}"));
+            lock (SessionSpans)
+            {
+                SessionSpans.Add(new Api.LoadSpan(
+                    name, Api.LoadPhase.AssetSession,
+                    ToEngineMs(stat.FirstTicks), (stat.LastTicks - stat.FirstTicks) * SwTicksToMs,
+                    $"{loaded}/{stat.Total}"));
+            }
         }
 
         // 除零防护(todo#5):会话首见时可能 loaded 与 remaining 同时为 0(资产批量
         // 加载失败时会静默丢弃非 Ok 的请求、一调用内清空完成)→ 0/0 = NaN。
         // 空会话按已完成处理。
         float local = stat.Total > 0 ? 1f - remaining / (float)stat.Total : 1f;
-        Present(range.Start + (range.End - range.Start) * local, stepText, detail(stat.Total), false);
+        Present(range.Stage, range.Start + (range.End - range.Start) * local, local,
+            stepText, detail(stat.Total, stat.CurrentItem), false);
     }
 
     /// <summary>路标:Logo=0.82 / MenuLoad=0.88 / MainMenu=0.66(仅首次生效)。</summary>
     internal void Waypoint(BootWaypoint w, string stepText, string detail)
     {
+        if (Frozen) return;
         if (w == BootWaypoint.MainMenu)
         {
             if (_menuHandled) return;
             _menuHandled = true;
         }
-        Present(WaypointFractions[w], stepText, detail, true);
+        BootStage stage = w switch
+        {
+            BootWaypoint.MainMenu => BootStage.OpeningAssets,
+            BootWaypoint.Logo => BootStage.Intro,
+            _ => BootStage.Menu,
+        };
+        Present(stage, WaypointFractions[w], -1f, stepText, detail, true);
     }
 
     /// <summary>gd splash 交接(BootSplash.Handoff):引擎启动锚点 + 前奏阶段 spans。</summary>
@@ -225,18 +290,22 @@ internal sealed class BootTimeline
         long nowMsec = _engineMsec();
         if (_bootAnchorMsec >= 0)
         {
-            PhaseSpans.Add(new Api.LoadSpan(
-                "phase.prelude", Api.LoadPhase.Prelude,
-                _bootAnchorMsec, nowMsec - _bootAnchorMsec, ""));
-            PhaseSpans.Add(new Api.LoadSpan(
-                "phase.engine_init", Api.LoadPhase.Prelude,
-                0, _bootAnchorMsec, ""));
+            lock (PhaseSpans)
+            {
+                PhaseSpans.Add(new Api.LoadSpan(
+                    "phase.prelude", Api.LoadPhase.Prelude,
+                    _bootAnchorMsec, nowMsec - _bootAnchorMsec, ""));
+                PhaseSpans.Add(new Api.LoadSpan(
+                    "phase.engine_init", Api.LoadPhase.Prelude,
+                    0, _bootAnchorMsec, ""));
+            }
         }
     }
 
     /// <summary>主菜单已显示(ExecuteDeferred 语义):收尾末步骤 span、TotalBootMs(含首启兜底)、冻结、呈现 1.0。</summary>
     internal void MenuReady(string doneText, string detail)
     {
+        if (Frozen) return;
         ClosePendingStep(_swTicks());
 
         if (_bootAnchorMsec >= 0)
@@ -251,7 +320,7 @@ internal sealed class BootTimeline
             _totalBootMs = _engineMsec();
         }
         Frozen = true;
-        Present(1.0f, doneText, detail, true);
+        Present(BootStage.Menu, 1.0f, 1f, doneText, detail, true);
     }
 
     /// <summary>一行启动摘要(读 spans 的诊断文本);无 mod 数据时返回 null(编排层免记日志)。</summary>
@@ -274,8 +343,9 @@ internal sealed class BootTimeline
 
     private void ClosePendingStep(long nowTicks)
     {
-        if (StepSpans.Count > 0 && _lastStepTicks >= 0)
+        lock (StepSpans)
         {
+            if (StepSpans.Count == 0 || _lastStepTicks < 0) return;
             var prev = StepSpans[^1];
             StepSpans[^1] = prev with
             {

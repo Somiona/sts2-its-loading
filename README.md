@@ -12,9 +12,12 @@
 
 这个 mod 在游戏启动过程中会显示进度条,并且告诉你**现在到底在干什么**:
 
+- 上方细条显示从创意工坊到主菜单的全程阶段进度
+- 下方亮条显示当前阶段内部进度
 - 正在读取创意工坊订阅(第几个 / 共几个)
 - 正在加载哪个模组、花了多少毫秒
-- 游戏启动到哪一步(图集 / 本地化 / 模型数据库 / 资源预载……)
+- 游戏启动到哪一步(图集 / 本地化 / 模型数据库 / 主菜单资源……)
+- 资产批量完成时显示当前正在处理的资源文件
 
 <p align="center"><img src="load_bar.png" alt="启动画面:工坊读取进度条"/></p>
 
@@ -56,9 +59,12 @@ With a pile of mods installed, every game launch means staring at a black screen
 
 This mod shows a progress bar during game startup, telling you **what is actually happening**:
 
+- A thin overall bar tracks the complete path from Workshop discovery to the main menu
+- A brighter local bar tracks progress inside the current stage
 - Reading Steam Workshop subscriptions (which one / how many)
 - Which mod is being loaded, down to the millisecond
-- Which boot step the game is on (atlases / localization / model database / preload…)
+- Which boot step the game is on (atlases / localization / model database / menu assets…)
+- The current resource file when the game completes assets in batches
 
 <p align="center"><img src="load_bar.png" alt="Boot splash: workshop reading progress bar"/></p>
 

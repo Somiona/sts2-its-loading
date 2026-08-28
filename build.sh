@@ -20,6 +20,10 @@ fi
 # i18n 门禁:eng 缺使用中的键 = 构建失败(set -e 生效);其他语言缺键出警告
 python3 tools/check_i18n.py
 
+# gd 模板门禁:verbatim 引号转义断裂会让生成的 gd 脚本整体解析失败
+# (2026-08-29 实机事故:裸引号 → autoload 全灭);C# 测试覆盖不到模板文本
+python3 tools/check_gd_template.py
+
 # 时间线数学回归(纯 BCL,离线跑;本机仅 .NET 10 运行时,故测试工程 target net10.0)
 dotnet test tests/ItsLoadingTimeline.Tests/ItsLoadingTimeline.Tests.csproj -c Release
 

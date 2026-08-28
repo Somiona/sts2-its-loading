@@ -22,7 +22,6 @@ internal static class BootPhasePatches
         ("MegaCrit.Sts2.Core.Localization.LocManager", "Initialize", "step.loc"),
         ("MegaCrit.Sts2.Core.Models.ModelDb", "Init", "step.modeldb"),
         ("MegaCrit.Sts2.Core.Models.ModelDb", "InitIds", "step.ids"),
-        ("MegaCrit.Sts2.Core.Models.ModelDb", "Preload", "step.preload"),
     };
 
     private static readonly Dictionary<MethodBase, string> StepMap = new();
@@ -42,6 +41,15 @@ internal static class BootPhasePatches
             harmony.Patch(mi, prefix: new HarmonyMethod(typeof(BootPhasePatches), nameof(StepPrefix)));
         }
         Log.Warn($"[ItsLoading] step patches installed ({StepMap.Count}/{Steps.Length})");
+
+        var essential = AccessTools.Method(
+            "MegaCrit.Sts2.Core.Helpers.OneTimeInitialization:ExecuteEssential");
+        if (essential != null)
+        {
+            harmony.Patch(essential,
+                postfix: new HarmonyMethod(typeof(BootPhasePatches), nameof(AfterEssential)));
+            Log.Warn("[ItsLoading] ExecuteEssential completion patch installed");
+        }
 
         var menu = AccessTools.Method("MegaCrit.Sts2.Core.Nodes.NGame:LaunchMainMenu");
         if (menu != null)
@@ -85,7 +93,8 @@ internal static class BootPhasePatches
 
     // ---- 资产会话 postfix:反射读队列实时状态 ----
 
-    private static FieldInfo _fName, _fToLoad, _fLoading, _fFinalizing, _fVfx, _fVfxLoading, _fTotal;
+    private static FieldInfo _fName, _fToLoad, _fLoading, _fFinalizing, _fVfx,
+        _fVfxLoading, _fCurrentVfx, _fTotal;
 
     private static void CacheSessionFields(Type t)
     {
@@ -95,10 +104,25 @@ internal static class BootPhasePatches
         _fFinalizing = AccessTools.Field(t, "_finalizing");
         _fVfx = AccessTools.Field(t, "_vfxScenes");
         _fVfxLoading = AccessTools.Field(t, "_vfxLoading");
+        _fCurrentVfx = AccessTools.Field(t, "_currentVfxPath");
         _fTotal = AccessTools.Field(t, "_totalLoaded");
     }
 
     private static int Count(object queue) => (queue as System.Collections.ICollection)?.Count ?? 0;
+
+    private static string FirstPath(object queue)
+    {
+        if (queue is not System.Collections.IEnumerable items) return null;
+        foreach (object item in items) return item as string;
+        return null;
+    }
+
+    private static string ShortPath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return null;
+        int slash = Math.Max(path.LastIndexOf('/'), path.LastIndexOf('\\'));
+        return slash >= 0 ? path[(slash + 1)..] : path;
+    }
 
     private static void AfterSessionProcess(object __instance)
     {
@@ -117,13 +141,23 @@ internal static class BootPhasePatches
                           + Count(_fVfx?.GetValue(__instance))
                           + ((_fVfxLoading?.GetValue(__instance) is true) ? 1 : 0);
             int loaded = _fTotal?.GetValue(__instance) as int? ?? 0;
+            string current = (_fVfxLoading?.GetValue(__instance) is true
+                    ? _fCurrentVfx?.GetValue(__instance) as string
+                    : null)
+                ?? FirstPath(_fFinalizing?.GetValue(__instance))
+                ?? FirstPath(_fLoading?.GetValue(__instance))
+                ?? FirstPath(_fToLoad?.GetValue(__instance));
+            current = ShortPath(current);
 
             // 计数文案走 Func<int,string>(stat.Total 在时间线;空会话防护也在时间线)
-            ItsLoading.Timeline.SessionAdvanced(__instance, name, loaded, remaining,
+            ItsLoading.Timeline.SessionAdvanced(__instance, name, loaded, remaining, current,
                 I18n.T("bar.assets", new() { ["name"] = name }),
-                total => I18n.T("bar.assetsCount", new() { ["n"] = $"{loaded}/{total}" }));
+                (total, item) => I18n.T("bar.assetsCount", new() { ["n"] = $"{loaded}/{total}" })
+                    + (string.IsNullOrEmpty(item) ? "" : $" · {item}"));
         });
     }
+
+    private static void AfterEssential() => ItsLoading.Timeline.EssentialCompleted();
 
     private static void BeforeLogoPlay()
     {

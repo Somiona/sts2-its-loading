@@ -8,15 +8,17 @@ namespace ItsLoading;
 
 // ---------------------------------------------------------------- 启动画面(gd splash)自注入
 //
-// 架构拆分 #2 从 ItsLoading.cs 原样搬出:帧 0 起效的 GDScript 底部条
-// (覆盖 C# 加载前的 0→0.25 段)与其安装/交接/延迟回收。
-// gd↔C# 字符串契约(AutoloadName · "boot_start_msec" · "takeover")集中在本类。
+// 帧 0 起效的 GDScript 经典双条:先自行覆盖工坊阶段,随后经 GdBridgeBar
+// 接收 C# 时间线快照并持续到菜单就绪。安装、协议模板、锚点与延迟回收集中在本类。
 
 internal static class BootSplash
 {
     private const string AutoloadName = "LoadingBarBoot";
     private const string GdUserPath = "user://loadingbar_boot.gd";
     private const string CfgMarker = "; LoadingBar mod autoload";
+
+    /// <summary>gd splash 自动载入节点名(GdBridgeBar 探测/Handoff 寻址共用)。</summary>
+    internal static string AutoloadNodeName => AutoloadName;
 
     private static bool _injectedThisRun;
     private static Godot.Node _bootSplashNode; // 延迟清理的 gd splash 引用
@@ -73,11 +75,13 @@ internal static class BootSplash
             {
                 ItsLoading.Timeline?.SetBootAnchor(anchor.AsInt64());
             }
-            // 不隐藏 gd splash!让 C# 条(层级 999)直接叠在 gd 条(层级 998)上面。
-            // 隐藏 CanvasLayer 会触发渲染状态变更,在无新帧提交时可能被 MoltenVK 清屏 —— 这就是黑屏间隙的来源。
-            // gd 的 _process(shimmer)继续跑但不被看见;延迟到 C# 条移除时一并清理。
+            // 正常路径:该节点已经由 GdBridgeBar 接管,继续作为唯一 UI。
+            // 首启/版本不匹配:ClassicBar(999)覆盖本节点(998),仍不在同步突发期隐藏它，
+            // 避免 MoltenVK 因渲染状态变化出现黑屏间隙。
             _bootSplashNode = boot;
-            Log.Warn("[ItsLoading] boot splash kept visible under mod bar (no takeover)");
+            Log.Warn(ItsLoading.Theme is GdBridgeBar
+                ? "[ItsLoading] gd boot view retained as the active loading UI"
+                : "[ItsLoading] old gd boot view kept under ClassicBar fallback");
         }
         else
         {
@@ -96,8 +100,8 @@ internal static class BootSplash
     /// 替换 token(由 BuildBootSplashGd() 用共享常量替换,勿在模板里写死):
     ///   @@MOD_ID@@ / @@AUTOLOAD_NAME@@ / @@GD_USER_PATH@@ / @@CFG_MARKER@@ —— 身份契约,
     ///   与 C# 侧常量同源(漂移 = 自清理失灵,故必须走 token)
-    ///   @@*_COLOR@@ —— 颜色(条样式唯一真源在 ItsLoading)
-    /// 几何常量(24/8/20/36/14/56/5/64/48)与 C# BuildBar 成对,改布局需手动同步。
+    ///   @@*_COLOR@@ / @@*_Y@@ / @@*_HEIGHT@@ —— ClassicBar 的样式常量,
+    ///   gd 正常路径与 C# 首启兜底共享同一真源。
     /// </summary>
     private static readonly string BootSplashGd = BuildBootSplashGd();
 
@@ -107,31 +111,53 @@ internal static class BootSplash
             .Replace("@@AUTOLOAD_NAME@@", AutoloadName)
             .Replace("@@GD_USER_PATH@@", GdUserPath)
             .Replace("@@CFG_MARKER@@", CfgMarker)
+            .Replace("@@BRIDGE_VERSION@@", GdBridgeBar.BridgeVersion.ToString())
+            .Replace("@@STAGE_COUNT@@", LoadingViewState.StageCount.ToString())
+            .Replace("@@WORKSHOP_END@@", GdFloat(BootTimeline.WorkshopEnd))
             .Replace("@@TRACK_COLOR@@", GdColor(ClassicBar.BarTrackColor))
             .Replace("@@DETAIL_COLOR@@", GdColor(ClassicBar.BarDetailColor))
-            .Replace("@@FILL_COLOR@@", GdColor(ClassicBar.BarFillColor));
+            .Replace("@@FILL_COLOR@@", GdColor(ClassicBar.BarFillColor))
+            .Replace("@@OVERALL_FILL_COLOR@@", GdColor(ClassicBar.OverallFillColor))
+            .Replace("@@PAD@@", GdFloat(ClassicBar.HorizontalPadding))
+            .Replace("@@STRIP_HEIGHT@@", GdFloat(ClassicBar.StripHeight))
+            .Replace("@@STEP_Y@@", GdFloat(ClassicBar.StepY))
+            .Replace("@@DETAIL_Y@@", GdFloat(ClassicBar.DetailY))
+            .Replace("@@OVERALL_Y@@", GdFloat(ClassicBar.OverallY))
+            .Replace("@@OVERALL_HEIGHT@@", GdFloat(ClassicBar.OverallHeight))
+            .Replace("@@LOCAL_Y@@", GdFloat(ClassicBar.LocalY))
+            .Replace("@@LOCAL_HEIGHT@@", GdFloat(ClassicBar.LocalHeight))
+            .Replace("@@PULSE_MIN@@", GdFloat(ClassicBar.IndeterminateMinWidth))
+            .Replace("@@PULSE_TRAVEL@@", GdFloat(ClassicBar.IndeterminateTravel));
 
     /// <summary>Color → GDScript 字面量(不变文化,防区域设置把小数点变逗号)。</summary>
     private static string GdColor(Color c) => string.Create(
         System.Globalization.CultureInfo.InvariantCulture,
         $"Color({c.R:0.####}, {c.G:0.####}, {c.B:0.####}, {c.A:0.####})");
 
+    private static string GdFloat(float value) => value.ToString(
+        "0.####", System.Globalization.CultureInfo.InvariantCulture);
+
     private const string BootSplashGdTemplate = @"extends Node
-# LoadingBar boot splash — injected by ItsLoading mod. BOOT_VERSION = 9
+# LoadingBar boot view — injected by ItsLoading mod. BOOT_VERSION = 13
 # 启动时主动自检:mod 在 settings 里被禁用、或本地/工坊文件均已不存在,
 # 则不显示任何进度条,并错后 2 秒做原子自清理(避开启动期 I/O;任何时刻被强退均无害)。
 # 正常路径:与 C# 侧一致的底部条(无垫底),负责进度刻度 0 → 0.25,
-# 尾部增量跟踪 godot.log 显示工坊读取进度,C# 初始化后 takeover() 接管。
+# 尾部增量跟踪 godot.log 显示工坊读取进度。
+# 桥协议(BOOT_VERSION 13 / bridge_version 2):C# 侧经 csharp_attach() 确认接管后,本节点
+# 成为唯一加载 UI——工坊轮询/旧 30s 安全网停用,节点保持可见且仅保留 5 分钟失联看门狗;
+# 全程呈现改由 C# 侧 csharp_present() 逐事件驱动(与 ClassicBar 同一数学与出帧配对)。
+# 退休仍走 takeover()(隐藏图层);版本协商字段 bridge_version(C# 侧见 GdBridgeBar)。
 
 const LOG_PATH := ""user://logs/godot.log""
-const FRAC_END := 0.25
+const FRAC_END := @@WORKSHOP_END@@
 const MOD_ID := ""@@MOD_ID@@""
 const CLEANUP_DELAY := 2.0
 
 var _layer: CanvasLayer
 var _step: Label
 var _detail: Label
-var _fill: ColorRect
+var _overall_fill: ColorRect
+var _local_fill: ColorRect
 var _track_w := 0.0
 var _t := 0.0
 var _elapsed := 0.0
@@ -148,6 +174,30 @@ var boot_start_msec := 0
 var _lang := ""eng""
 var _strings := {}
 var _frozen := false
+# ---- C# 桥状态 ----
+var bridge_version := @@BRIDGE_VERSION@@
+var _bridge_attached := false
+var _local_indeterminate := true
+var _bridge_last_present_msec := 0
+var _last_stage := 0
+var _smooth_progress := false
+var _overall_display := 0.0
+var _overall_target := 0.0
+var _local_display := 0.0
+var _local_target := 0.0
+# 仅兜底 C# 中途死亡；必须远高于合法的慢云同步/慢 mod 启动。
+const BRIDGE_WATCHDOG_MSEC := 300000
+const SMOOTH_SPEED := 5.0
+# ---- 活动日志(阶段行上方的小字滚动历史) ----
+# 同步突发期间主循环不迭代、强制帧不上屏(macOS/Metal 实测):突发里 present
+# 推进的一切都不可见,条会从工坊直接跳到资产阶段。日志在突发期间照常积累
+# (present 仍在调用),帧恢复后用户看到突发尾部——卡住时加载了什么,有据可查。
+const ACTIVITY_LINES := 10
+const ACTIVITY_LINE_H := 17.0
+const ACTIVITY_FONT := 12
+var _log_lines: Array = []
+var _log_labels: Array = []
+var _last_log := """"
 
 func _ready() -> void:
 	boot_start_msec = Time.get_ticks_msec()
@@ -160,6 +210,10 @@ func _ready() -> void:
 		_load_strings()
 		_build_ui()
 		_skip_log_history()
+		# 先显示 0/N,避免首次 0.2s 日志轮询把用户的第一眼直接批到 6/N。
+		_steam_total = _count_workshop()
+		if _steam_total > 0:
+			_set_progress(0, _steam_total, """")
 		print(""[LoadingBarBoot] splash ready at frame "", Engine.get_frames_drawn())
 
 func _detect_language() -> void:
@@ -335,42 +389,58 @@ func _cfg_without_us(s: String) -> String:
 func _build_ui() -> void:
 	var vs: Vector2 = get_viewport().get_visible_rect().size
 	_layer = CanvasLayer.new()
-	# 998:C# 条在 999。两条同为 999 时,首次 ForceDraw 的同层双 canvas 会让
-	# MoltenVK 掉帧 → prelude 与 C# 条之间出现 ~0.4s 黑屏(2026-08-26 实测)。
+	# 正常路径中本层从帧 0 持续到菜单就绪;998 仅让首启/版本不匹配时的
+	# C# ClassicBar(999)可以无闪烁覆盖它。
 	_layer.layer = 998
 	add_child(_layer)
 
 	var strip := Control.new()
 	strip.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	strip.offset_top = -64.0
+	strip.offset_top = -@@STRIP_HEIGHT@@
 	_layer.add_child(strip)
 
 	_step = Label.new()
-	_step.position = Vector2(24, 8)
+	_step.position = Vector2(@@PAD@@, @@STEP_Y@@)
 	_step.add_theme_font_size_override(""font_size"", 20)
 	_step.add_theme_color_override(""font_color"", Color.WHITE)
 	_step.text = _txt(""bar.starting"")
 	strip.add_child(_step)
 
 	_detail = Label.new()
-	_detail.position = Vector2(24, 36)
+	_detail.position = Vector2(@@PAD@@, @@DETAIL_Y@@)
 	_detail.add_theme_font_size_override(""font_size"", 14)
 	_detail.add_theme_color_override(""font_color"", @@DETAIL_COLOR@@)
 	_detail.text = ""engine boot""
 	strip.add_child(_detail)
 
-	_track_w = vs.x - 48.0
+	_track_w = vs.x - @@PAD@@ * 2.0
+	_overall_fill = _add_bar(strip, @@OVERALL_Y@@, @@OVERALL_HEIGHT@@, @@OVERALL_FILL_COLOR@@)
+	_local_fill = _add_bar(strip, @@LOCAL_Y@@, @@LOCAL_HEIGHT@@, @@FILL_COLOR@@)
+
+	# 活动日志:条带上方、向上滚动;越旧越淡。负 y = 在条带上边缘之上
+	# (Control 默认不裁剪子节点)。
+	var base_col: Color = @@DETAIL_COLOR@@
+	for i in ACTIVITY_LINES:
+		var l := Label.new()
+		l.position = Vector2(@@PAD@@, -(float(ACTIVITY_LINES - i) * ACTIVITY_LINE_H + 4.0))
+		l.add_theme_font_size_override(""font_size"", ACTIVITY_FONT)
+		l.add_theme_color_override(""font_color"",
+			Color(base_col.r, base_col.g, base_col.b, 0.3 + 0.65 * float(i + 1) / ACTIVITY_LINES))
+		strip.add_child(l)
+		_log_labels.append(l)
+
+func _add_bar(strip: Control, y: float, height: float, fill_color: Color) -> ColorRect:
 	var track := ColorRect.new()
-	track.position = Vector2(24, 56)
-	track.size = Vector2(_track_w, 5)
+	track.position = Vector2(@@PAD@@, y)
+	track.size = Vector2(_track_w, height)
 	track.color = @@TRACK_COLOR@@
 	strip.add_child(track)
-
-	_fill = ColorRect.new()
-	_fill.position = Vector2.ZERO
-	_fill.size = Vector2(0, 5)
-	_fill.color = @@FILL_COLOR@@
-	track.add_child(_fill)
+	var fill := ColorRect.new()
+	fill.position = Vector2.ZERO
+	fill.size = Vector2(0, height)
+	fill.color = fill_color
+	track.add_child(fill)
+	return fill
 
 func _skip_log_history() -> void:
 	var f := FileAccess.open(LOG_PATH, FileAccess.READ)
@@ -382,6 +452,21 @@ func _process(delta: float) -> void:
 	if _cleanup_pending and not _cleaned and _elapsed >= CLEANUP_DELAY:
 		_do_cleanup()
 	if _done:
+		return
+	if _bridge_attached:
+		# C# 正常驱动两条;无可测局部总量时只在自然帧上跑轻量 pulse。
+		_t += delta
+		if _local_indeterminate:
+			var w: float = @@PULSE_MIN@@ + abs(fmod(_t * 0.8, 2.0) - 1.0) * @@PULSE_TRAVEL@@
+			_local_fill.size.x = min(w, _track_w)
+		elif _smooth_progress:
+			_overall_display = move_toward(_overall_display, _overall_target, delta * SMOOTH_SPEED)
+			_local_display = move_toward(_local_display, _local_target, delta * SMOOTH_SPEED)
+			_overall_fill.size.x = _track_w * _overall_display
+			_local_fill.size.x = _track_w * _local_display
+		if Time.get_ticks_msec() - _bridge_last_present_msec > BRIDGE_WATCHDOG_MSEC:
+			print(""[LoadingBarBoot] bridge watchdog expired — dismissing stale boot view"")
+			takeover()
 		return
 	if _frozen:
 		# 同步突发已开始(首个 mod dll 加载,帧停止流动):冻结一切 UI 变更。
@@ -396,16 +481,22 @@ func _process(delta: float) -> void:
 		_poll_acc = 0.0
 		_poll_log()
 	if _steam_total <= 0:
-		var w: float = 60.0 + abs(fmod(_t * 0.8, 2.0) - 1.0) * 160.0
-		_fill.size.x = min(w, _track_w)
+		var w: float = @@PULSE_MIN@@ + abs(fmod(_t * 0.8, 2.0) - 1.0) * @@PULSE_TRAVEL@@
+		_local_fill.size.x = min(w, _track_w)
 	if _elapsed > 30.0:
 		takeover()
 
 func _set_progress(n: int, total: int, detail: String) -> void:
 	if total > 0 and n <= total:
-		var frac := FRAC_END * float(n) / float(total)
-		_fill.size.x = _track_w * frac
-		_step.text = _txt(""bar.workshop"").replace(""{n}"", str(n)).replace(""{t}"", str(total))
+		var local := float(n) / float(total)
+		_overall_display = FRAC_END * local
+		_overall_target = _overall_display
+		_local_display = local
+		_local_target = local
+		_overall_fill.size.x = _track_w * _overall_display
+		_local_fill.size.x = _track_w * _local_display
+		var name := _txt(""bar.workshop"").replace(""{n}"", str(n)).replace(""{t}"", str(total))
+		_step.text = _stage_text(1, name)
 		_detail.text = detail
 
 func _poll_log() -> void:
@@ -441,6 +532,7 @@ func _handle_line(line: String) -> void:
 		if id != """" and not _seen_ids.has(id):
 			_seen_ids[id] = true
 			_steam_n += 1
+			_log_line(""workshop "" + id)
 		if _steam_total < 0:
 			_steam_total = _count_workshop()
 		_set_progress(_steam_n, _steam_total, ""workshop "" + id)
@@ -473,6 +565,68 @@ func _count_workshop() -> int:
 		name = dir.get_next()
 	dir.list_dir_end()
 	return n
+
+# ---------------- C# 桥(本节点作为唯一加载 UI) ----------------
+
+func _stage_text(stage: int, name: String) -> String:
+	return _txt(""bar.stage"").replace(""{n}"", str(stage)).replace(""{t}"", ""@@STAGE_COUNT@@"").replace(""{name}"", name)
+
+# 活动日志推进:连续相同只记一次;帧冻结期间照常积累,恢复后可见尾部。
+func _log_line(text: String) -> void:
+	if text == """" or text == _last_log or _log_labels.is_empty():
+		return
+	_last_log = text
+	_log_lines.append(text)
+	if _log_lines.size() > ACTIVITY_LINES:
+		_log_lines = _log_lines.slice(_log_lines.size() - ACTIVITY_LINES)
+	var off := _log_lines.size() - _log_labels.size()
+	for i in _log_labels.size():
+		_log_labels[i].text = _log_lines[i + off] if i + off >= 0 else """"
+
+# C# 确认接管(版本协商已过)。只停工坊轮询与 shimmer,不隐藏、不替换节点;
+# _process 的接管早退见上。退休仍由 takeover() 负责(隐藏图层)。
+func csharp_attach() -> void:
+	if not _bridge_attached:
+		_bridge_attached = true
+		_bridge_last_present_msec = Time.get_ticks_msec()
+		print(""[LoadingBarBoot] bridge attached v"", bridge_version,
+			"" @"", Engine.get_frames_drawn(), "" frames; workshop "", _steam_n, ""/"", _steam_total)
+
+# 全程呈现(与 C# ClassicBar.Present 同一语义):
+#   overall/local —— 全程条 / 当前阶段条;local<0 表示不定进度
+#   stage      —— 1..7,用于阶段标题
+#   step/detail —— 当前完整文案快照
+# _done(已退休/被压制)或 UI 未建时静默丢弃——与 ClassicBar 的死亡标志同语义。
+func csharp_present(overall: float, local: float, stage: int,
+		step: String, detail: String) -> void:
+	if _done or _overall_fill == null or _local_fill == null:
+		return
+	_bridge_last_present_msec = Time.get_ticks_msec()
+	var stage_changed := stage != _last_stage
+	_last_stage = stage
+	_overall_target = clamp(overall, 0.0, 1.0)
+	var was_indeterminate := _local_indeterminate
+	_local_indeterminate = local < 0.0
+	_local_target = clamp(local, 0.0, 1.0) if not _local_indeterminate else 0.0
+	# 资产会话(阶段 4/5)有自然帧,可无等待地平滑批量跳变;同步阶段必须立即提交。
+	_smooth_progress = not stage_changed and not was_indeterminate and not _local_indeterminate and (stage == 4 or stage == 5)
+	if _local_indeterminate:
+		_overall_display = _overall_target
+		_overall_fill.size.x = _track_w * _overall_display
+		_local_fill.size.x = min(@@PULSE_MIN@@, _track_w)
+	elif stage_changed or not _smooth_progress:
+		_overall_display = _overall_target
+		_overall_fill.size.x = _track_w * _overall_display
+		_local_display = _local_target
+		_local_fill.size.x = _track_w * _local_display
+	_step.text = _stage_text(stage, step)
+	_detail.text = detail
+	# 活动日志:阶段切换记里程碑;否则记 detail——mod 的 prefix/postfix 各一行
+	# (加载中 / 「id · +耗时」),资产为「n/N · 文件」,计时的裸「+ms」带上步骤名。
+	if stage_changed:
+		_log_line(step)
+	elif detail != """":
+		_log_line(step + "" "" + detail if detail.begins_with(""+"") else detail)
 
 func takeover() -> void:
 	if _done:
