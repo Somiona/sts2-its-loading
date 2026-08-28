@@ -15,6 +15,9 @@ src/*/obj/
 tests/*/bin/
 tests/*/obj/
 
+# 工坊发布暂存
+dist/
+
 # 系统
 .DS_Store
 *.pyc
