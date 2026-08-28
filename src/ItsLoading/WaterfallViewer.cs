@@ -277,6 +277,10 @@ public static class WaterfallViewer
     internal static void BuildWaterfallChart(Node parent, Vector2 vs)
     {
         double total = Math.Max(1.0, Api.LoadingDurations.TotalBootMs);
+        // 时间轴跨度 = 总时长 + 3s 尾部空白:滚动到头时最后一个条与刻度标签
+        // 完整可见,且终点之后留有呼吸空间(2026-08-29 用户要求)。条的锚定
+        // 分母一律用 span,而不是 total——空白是锚定区之外的固有留白。
+        double span = total + 3000.0;
 
         // 汇总所有 span,按时间轴排序
         var rows = new System.Collections.Generic.List<Api.LoadSpan>();
@@ -294,12 +298,13 @@ public static class WaterfallViewer
             : b.DurationMs.CompareTo(a.DurationMs));
         FillWaterfallGaps(rows);
 
-        // 条形区宽度 = 每屏 37.5s(原始 45s/屏 的 1.2 倍):超出可视宽度即横向滚动,
-        // 换取更高的 px/s——短 mod 的条也能看清(2026-08-29 用户实测 1.5× 过密)。
+        // 条形区宽度:每屏 37.5s(原始 45s/屏 的 1.2 倍),超出可视宽度即横向滚动。
+        // 「每屏」按右栏可视宽度校准:总宽 - 左右边距 - 名称列 - 纵向滚动条
+        // (旧版把名称列也算进屏宽,实际每屏只有 ~28s,比例尺比标称偏密)。
         const double secondsPerScreen = 37.5;
         const float nameColW = 340f;
-        double usable = Math.Max(320.0, vs.X - 96.0); // 扣除左右各 48 边距
-        float timelineW = (float)Math.Max(usable, usable * total / 1000.0 / secondsPerScreen);
+        double usable = Math.Max(320.0, vs.X - 96.0 - nameColW - 16.0);
+        float timelineW = (float)Math.Max(usable, usable * span / 1000.0 / secondsPerScreen);
 
         // 双栏滚动(菜单阶段正常帧循环,Container 可用):左名称列独立面板、
         // 禁横向滚动 → 始终可见;横向滚动只作用于右栏条形区。两栏纵向滚动同步。
@@ -369,7 +374,7 @@ public static class WaterfallViewer
         float lineH = 20f + rows.Count * 18f + 40f;
         for (double t = 0; t <= total; t += 5000.0)
         {
-            float frac = (float)(t / total);
+            float frac = (float)(t / span);
             var tick = new Label { Text = $"{t / 1000.0:F0}s" };
             tick.AnchorLeft = frac;
             tick.AddThemeFontSizeOverride("font_size", 12);
@@ -414,14 +419,35 @@ public static class WaterfallViewer
 
             // 数值加固:锚点必须落在 [0,1] 且非 NaN——负 StartMs(gd 锚点交接缝)或
             // 病态时长直接进 Godot 原生布局,在 Wine 渲染栈上是潜在原生崩溃源。
-            float start = (float)Math.Clamp(s.StartMs / total, 0.0, 1.0);
-            float end = (float)Math.Clamp((s.StartMs + s.DurationMs) / total, 0.0, 1.0);
+            float start = (float)Math.Clamp(s.StartMs / span, 0.0, 1.0);
+            float end = (float)Math.Clamp((s.StartMs + s.DurationMs) / span, 0.0, 1.0);
             if (float.IsNaN(start) || float.IsNaN(end) || end < start)
             {
                 Log.Warn($"[ItsLoading] wf skip bad span: {s.Id} start={s.StartMs:F0}ms dur={s.DurationMs:F0}ms");
                 continue;
             }
-            var bar = new ColorRect { Color = WfColor(s.Phase) };
+            Color baseColor = WfColor(s.Phase);
+            // 悬浮联动高亮(左标签 ↔ 右条,双向):描边 = 同锚定、四向外扩的同色
+            // 矩形垫在条下,条压住中心只露出 2px 边;标签侧向白色轻混 35%。
+            var halo = new ColorRect
+            {
+                Color = baseColor,
+                Visible = false,
+                // 纯视觉:不吃鼠标。否则指在条内部时悬浮目标是条自身而非
+                // barArea,联动高亮只在条外沿触发(2026-08-29 实测 bug)。
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            halo.AnchorLeft = start;
+            halo.AnchorRight = Math.Max(end, start + 0.0015f);
+            halo.AnchorTop = 0f;
+            halo.AnchorBottom = 1f;
+            halo.OffsetLeft = -2f;
+            halo.OffsetRight = 2f;
+            halo.OffsetTop = 1f;
+            halo.OffsetBottom = -1f;
+            barArea.AddChild(halo);
+
+            var bar = new ColorRect { Color = baseColor, MouseFilter = Control.MouseFilterEnum.Ignore };
             bar.AnchorLeft = start;
             bar.AnchorRight = Math.Max(end, start + 0.0015f);
             bar.AnchorTop = 0f;
@@ -429,6 +455,18 @@ public static class WaterfallViewer
             bar.OffsetTop = 4f;
             bar.OffsetBottom = -4f;
             barArea.AddChild(bar);
+
+            Color hoverColor = baseColor.Lerp(Colors.White, 0.35f);
+            void SetHover(bool on)
+            {
+                halo.Visible = on;
+                name.AddThemeColorOverride("font_color", on ? hoverColor : baseColor);
+            }
+            name.MouseFilter = Control.MouseFilterEnum.Stop; // Label 默认忽略鼠标
+            name.MouseEntered += () => SetHover(true);
+            name.MouseExited += () => SetHover(false);
+            barArea.MouseEntered += () => SetHover(true);
+            barArea.MouseExited += () => SetHover(false);
         }
     }
 }
