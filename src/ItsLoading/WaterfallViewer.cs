@@ -21,6 +21,9 @@ public static class WaterfallViewer
 {
     private static CanvasLayer _waterfallLayer; // 瀑布图层(打开期间兼作热键阻断屏)
     private static bool _wfRegistered;          // 瀑布图入口是否已注册(防重复)
+    // 折叠(默认)= 隐藏工坊扫描逐项与 mod 内部子步骤两组细节行;mod 整体耗时保留。
+    // 静态:会话内切换后记住,重开瀑布图保持上次选择。
+    private static bool _wfDetailed;
 
     /// <summary>
     /// BaseLib 已加载时注册(常规路径 = AfterModLoad 观察到 BaseLib 加载完成;
@@ -141,6 +144,20 @@ public static class WaterfallViewer
             close.Pressed += Close;
             _waterfallLayer.AddChild(close);
 
+            // 折叠/详细:切换后整体重建(Show 的 toggle 语义天然支持)
+            var detail = new Button
+            {
+                Text = _wfDetailed ? I18n.T("wf.detailed") : I18n.T("wf.collapsed"),
+            };
+            detail.Position = new Vector2(vs.X - 380f, 24f);
+            detail.Pressed += () =>
+            {
+                _wfDetailed = !_wfDetailed;
+                Close();
+                Show();
+            };
+            _waterfallLayer.AddChild(detail);
+
             if (Api.LoadingDurations.IsReady)
             {
                 Log.Warn("[ItsLoading] wf stage 3: chart build");
@@ -189,6 +206,12 @@ public static class WaterfallViewer
     {
         string modName = ModManager.Mods.FirstOrDefault(m => m.manifest?.id == s.Id)
             ?.manifest?.name;
+        // 子步骤行:mod 名 + 子步骤(init 类型 / pck 文件),与所属 mod 行区分
+        if (s.Phase == Api.LoadPhase.ModSubStep)
+            return $"{modName ?? s.Id} · {s.Detail}";
+        // 工坊扫描行:Detail = mod 显示名(首启或未观测到时为空,走 id 回退)
+        if (s.Phase == Api.LoadPhase.Prelude && !string.IsNullOrEmpty(s.Detail))
+            return s.Detail;
         if (!string.IsNullOrEmpty(modName)) return modName;
         return I18n.T(s.Id);
     }
@@ -197,6 +220,7 @@ public static class WaterfallViewer
     {
         Api.LoadPhase.Prelude => new Color(0.55f, 0.57f, 0.62f, 1f),
         Api.LoadPhase.ModLoad => new Color(0.20f, 0.85f, 0.90f, 1f),
+        Api.LoadPhase.ModSubStep => new Color(0.20f, 0.85f, 0.90f, 0.55f),
         Api.LoadPhase.BootStep => new Color(0.95f, 0.70f, 0.25f, 1f),
         Api.LoadPhase.AssetSession => new Color(0.40f, 0.85f, 0.50f, 1f),
         _ => Colors.White,
@@ -260,33 +284,89 @@ public static class WaterfallViewer
         rows.AddRange(Api.LoadingDurations.BootSteps);
         rows.AddRange(Api.LoadingDurations.AssetSessions);
         rows.AddRange(Api.LoadingDurations.ModLoads);
+        if (_wfDetailed)
+        {
+            rows.AddRange(Api.LoadingDurations.ModSubSteps);
+            rows.AddRange(Api.LoadingDurations.WorkshopItems);
+        }
         rows.Sort((a, b) => a.StartMs != b.StartMs
             ? a.StartMs.CompareTo(b.StartMs)
             : b.DurationMs.CompareTo(a.DurationMs));
         FillWaterfallGaps(rows);
 
-        // 滚动区(菜单阶段正常帧循环,Container 可用)
-        var scroll = new ScrollContainer();
-        scroll.SetAnchorsPreset(Control.LayoutPreset.FullRect);
-        scroll.OffsetTop = 80f;
-        scroll.OffsetBottom = -40f;
-        scroll.OffsetLeft = 48f;
-        scroll.OffsetRight = -48f;
-        parent.AddChild(scroll);
+        // 条形区宽度 = 每屏 37.5s(原始 45s/屏 的 1.2 倍):超出可视宽度即横向滚动,
+        // 换取更高的 px/s——短 mod 的条也能看清(2026-08-29 用户实测 1.5× 过密)。
+        const double secondsPerScreen = 37.5;
+        const float nameColW = 340f;
+        double usable = Math.Max(320.0, vs.X - 96.0); // 扣除左右各 48 边距
+        float timelineW = (float)Math.Max(usable, usable * total / 1000.0 / secondsPerScreen);
+
+        // 双栏滚动(菜单阶段正常帧循环,Container 可用):左名称列独立面板、
+        // 禁横向滚动 → 始终可见;横向滚动只作用于右栏条形区。两栏纵向滚动同步。
+        var split = new HBoxContainer();
+        split.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        split.OffsetTop = 80f;
+        split.OffsetBottom = -40f;
+        split.OffsetLeft = 48f;
+        split.OffsetRight = -48f;
+        parent.AddChild(split);
+
+        var leftScroll = new ScrollContainer
+        {
+            CustomMinimumSize = new Vector2(nameColW, 0f),
+            SizeFlagsVertical = (Control.SizeFlags.Fill | Control.SizeFlags.Expand),
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+            VerticalScrollMode = ScrollContainer.ScrollMode.ShowNever,
+        };
+        split.AddChild(leftScroll);
+        var leftBox = new VBoxContainer
+        {
+            SizeFlagsHorizontal = (Control.SizeFlags.Fill | Control.SizeFlags.Expand),
+        };
+        leftScroll.AddChild(leftBox);
+        // 顶部垫块:与右栏的 22px 刻度行对齐,行序一一对应
+        leftBox.AddChild(new Control { CustomMinimumSize = new Vector2(0f, 22f) });
+
+        var rightScroll = new ScrollContainer
+        {
+            SizeFlagsHorizontal = (Control.SizeFlags.Fill | Control.SizeFlags.Expand),
+            SizeFlagsVertical = (Control.SizeFlags.Fill | Control.SizeFlags.Expand),
+        };
+        split.AddChild(rightScroll);
 
         var box = new VBoxContainer
         {
             SizeFlagsHorizontal = (Control.SizeFlags.Fill | Control.SizeFlags.Expand),
         };
-        scroll.AddChild(box);
+        rightScroll.AddChild(box);
 
-        // 时间轴刻度(每 5s)
+        // 纵向同步(任一侧滚动都带动另一侧;同值写入不触发事件,无递归)
+        bool syncing = false;
+        leftScroll.GetVScrollBar().ValueChanged += v =>
+        {
+            if (syncing) return;
+            syncing = true;
+            rightScroll.ScrollVertical = (int)v;
+            syncing = false;
+        };
+        rightScroll.GetVScrollBar().ValueChanged += v =>
+        {
+            if (syncing) return;
+            syncing = true;
+            leftScroll.ScrollVertical = (int)v;
+            syncing = false;
+        };
+
+        // 时间轴刻度(每 5s),锚在右栏条形区内(左栏就是名称列,天然与条对齐)。
         var ruler = new Control
         {
-            CustomMinimumSize = new Vector2(0, 22f),
+            CustomMinimumSize = new Vector2(timelineW, 22f),
             SizeFlagsHorizontal = (Control.SizeFlags.Fill | Control.SizeFlags.Expand),
         };
         box.AddChild(ruler);
+        // 竖线高度按实际行数算:行数随 mod/子步骤规模变化,写死 2000px 会在
+        // 长列表中途断掉。
+        float lineH = 20f + rows.Count * 18f + 40f;
         for (double t = 0; t <= total; t += 5000.0)
         {
             float frac = (float)(t / total);
@@ -299,7 +379,7 @@ public static class WaterfallViewer
             line.AnchorLeft = frac;
             line.AnchorRight = frac;
             line.OffsetTop = 20f;
-            line.OffsetBottom = 2000f;
+            line.OffsetBottom = lineH;
             ruler.AddChild(line);
         }
 
@@ -307,7 +387,7 @@ public static class WaterfallViewer
         {
             var row = new HBoxContainer
             {
-                CustomMinimumSize = new Vector2(0, 18f),
+                CustomMinimumSize = new Vector2(timelineW, 18f),
                 SizeFlagsHorizontal = (Control.SizeFlags.Fill | Control.SizeFlags.Expand),
             };
             box.AddChild(row);
@@ -318,16 +398,16 @@ public static class WaterfallViewer
                 // 显示时:mod 行查 manifest.name(游戏的 mod 列表同款,中文名存在 manifest 里);
                 // 非 mod 行查 i18n 表(step.atlas 等译出);都不命中原样透传。
                 Text = $"{WfRowLabel(s)}  {s.DurationMs / 1000.0:F2}s",
-                CustomMinimumSize = new Vector2(340f, 18f),
+                CustomMinimumSize = new Vector2(nameColW, 18f),
                 ClipText = true,
             };
             name.AddThemeFontSizeOverride("font_size", 13);
             name.AddThemeColorOverride("font_color", WfColor(s.Phase));
-            row.AddChild(name);
+            leftBox.AddChild(name);
 
             var barArea = new Control
             {
-                CustomMinimumSize = new Vector2(0, 18f),
+                CustomMinimumSize = new Vector2(timelineW, 18f),
                 SizeFlagsHorizontal = (Control.SizeFlags.Fill | Control.SizeFlags.Expand),
             };
             row.AddChild(barArea);

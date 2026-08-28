@@ -83,11 +83,14 @@ internal sealed class BootTimeline
     private double _totalBootMs = -1;
     private long _bootAnchorMsec = -1;
     private long _modStartTicks, _firstModTicks = -1, _lastModTicks, _lastStepTicks = -1;
+    private string? _currentModId; // 当前正在加载的 mod(子步骤 span 的归属)
     private bool _menuHandled;
     private LoadingViewState _current = new(BootStage.Mods, WorkshopEnd, 0f, null, null, false);
     internal LoadingViewState Current => _current;
 
     internal readonly List<Api.LoadSpan> ModSpans = new(capacity: 64);
+    internal readonly List<Api.LoadSpan> SubStepSpans = new(capacity: 128);
+    internal readonly List<Api.LoadSpan> WorkshopSpans = new(capacity: 64);
     internal readonly List<Api.LoadSpan> StepSpans = new(capacity: 16);
     internal readonly List<Api.LoadSpan> SessionSpans = new(capacity: 8);
     internal readonly List<Api.LoadSpan> PhaseSpans = new(capacity: 8);
@@ -132,6 +135,17 @@ internal sealed class BootTimeline
     internal void Replay(bool forceDraw = true) =>
         Presenter?.Invoke(_current with { ForceDraw = forceDraw });
 
+    /// <summary>
+    /// 纯日志事件:只更新细节文案,不推进任何进度(overall/local 原样)、不记 span、
+    /// 不强制出帧。给「mod 加载内部子步骤」(初始化器/资源包挂载)等 finer 粒度用。
+    /// </summary>
+    internal void Activity(string text)
+    {
+        if (Frozen) return;
+        _current = _current with { Detail = text, ForceDraw = false };
+        Presenter?.Invoke(_current);
+    }
+
     // ---- 写缝:钩子报事实 ----
 
     /// <summary>mod 段开始。processed 含本 mod 与本次启动中已经先于它处理的 mod。</summary>
@@ -150,10 +164,49 @@ internal sealed class BootTimeline
     {
         if (Frozen) return;
         PrefixCalls++;
+        _currentModId = id;
         _modStartTicks = _swTicks();
         if (_firstModTicks < 0) _firstModTicks = _modStartTicks;
         Present(BootStage.Mods, _current.Overall, Count / (float)Total,
             stepText, id, true);
+    }
+
+    /// <summary>
+    /// 工坊扫描时序(gd 轮询观测,Handoff 时一次性上交):每项一条 Prelude span,
+    /// 相邻观测差分 ≈ 单项耗时(含 Steam 异步查询;0.1s 轮询量化)。
+    /// startMsec 为 gd 引擎毫秒(与 ToEngineMs 同一时间轴,可直接作 StartMs)。
+    /// endMs ≤ 0 表示 gd 未观测到结束标记,以当前引擎时刻兜底。不推进进度条。
+    /// </summary>
+    internal void RecordWorkshopScan(List<(string Id, string Name, double StartMs)> entries, double endMs)
+    {
+        if (Frozen || entries.Count == 0) return;
+        if (endMs <= 0) endMs = _engineMsec();
+        lock (WorkshopSpans)
+        {
+            for (int i = 0; i < entries.Count; i++)
+            {
+                double end = i + 1 < entries.Count ? entries[i + 1].StartMs : endMs;
+                WorkshopSpans.Add(new Api.LoadSpan(
+                    "workshop " + entries[i].Id, Api.LoadPhase.Prelude,
+                    entries[i].StartMs, Math.Max(0, end - entries[i].StartMs),
+                    entries[i].Name));
+            }
+        }
+    }
+
+    /// <summary>
+    /// mod 加载内部子步骤(初始化器/资源包挂载):记 span(Id = 所属 mod id),
+    /// 只进 Api 数据与瀑布图,不推进进度条(活动日志文案由钩子另行 Activity)。
+    /// </summary>
+    internal void ModSubStep(string detail, long startTicks, long endTicks)
+    {
+        if (Frozen) return;
+        lock (SubStepSpans)
+        {
+            SubStepSpans.Add(new Api.LoadSpan(
+                _currentModId ?? "?", Api.LoadPhase.ModSubStep,
+                ToEngineMs(startTicks), (endTicks - startTicks) * SwTicksToMs, detail));
+        }
     }
 
     /// <summary>

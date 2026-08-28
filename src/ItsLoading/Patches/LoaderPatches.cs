@@ -14,6 +14,8 @@ internal static class LoaderPatches
 {
     private static long _lastMs; // 逐 mod 毫秒差(诊断文本用)
     private static int _lastG0, _lastG1, _lastG2; // 上个 postfix 时的 GC 回收次数(缝隙归因用)
+    private static long _initStartTicks; // 当前初始化器起始(活动日志文案 + Api span 共用)
+    private static long _packStartTicks; // 当前资源包挂载起始
 
     internal static void Install()
     {
@@ -28,6 +30,28 @@ internal static class LoaderPatches
             prefix: new HarmonyMethod(typeof(LoaderPatches), nameof(BeforeTryLoadMod)),
             postfix: new HarmonyMethod(typeof(LoaderPatches), nameof(AfterModLoad)));
         Log.Warn("[ItsLoading] TryLoadMod prefix+postfix installed OK");
+
+        // mod 加载内部子步骤(活动日志用,不推进进度条):TryLoadMod 内部依次是
+        // 程序集加载 → pck 挂载 → 反射扫描 → 初始化器执行(大头)。程序集加载是
+        // BCL 方法不挂钩;其余两个挂游戏/GodotSharp 自有方法。
+        var initializer = AccessTools.Method(
+            "MegaCrit.Sts2.Core.Modding.ModManager:CallModInitializer");
+        if (initializer != null)
+        {
+            harmony.Patch(initializer,
+                prefix: new HarmonyMethod(typeof(LoaderPatches), nameof(BeforeInitializer)),
+                postfix: new HarmonyMethod(typeof(LoaderPatches), nameof(AfterInitializer)));
+            Log.Warn("[ItsLoading] CallModInitializer sub-step patch installed");
+        }
+        var loadPack = AccessTools.Method(typeof(Godot.ProjectSettings),
+            nameof(Godot.ProjectSettings.LoadResourcePack));
+        if (loadPack != null)
+        {
+            harmony.Patch(loadPack,
+                prefix: new HarmonyMethod(typeof(LoaderPatches), nameof(BeforePackMounted)),
+                postfix: new HarmonyMethod(typeof(LoaderPatches), nameof(AfterPackMounted)));
+            Log.Warn("[ItsLoading] LoadResourcePack sub-step patch installed");
+        }
     }
 
     private static void BeforeTryLoadMod(Mod mod)
@@ -51,7 +75,7 @@ internal static class LoaderPatches
                 ["n"] = ItsLoading.Timeline.Count.ToString(),
                 ["t"] = ItsLoading.Timeline.Total.ToString(),
             }),
-            id);
+            I18n.T("bar.loadingMod", new() { ["id"] = id }));
     }
 
     private static void AfterModLoad(Mod mod)
@@ -68,9 +92,10 @@ internal static class LoaderPatches
         int n = ItsLoading.Timeline.ModLoaded(
             id, mod.state.ToString(),
             count => I18n.T("bar.mods", new() { ["n"] = count.ToString(), ["t"] = ItsLoading.Timeline.Total.ToString() }),
-            $"{id} · +{delta}ms",
+            I18n.T("bar.modLoaded", new() { ["id"] = id, ["ms"] = $"{delta}ms" }),
             I18n.T("bar.modsDone"),
-            count => $"{count} · {ItsLoading.Sw.ElapsedMilliseconds}ms");
+            count => I18n.T("bar.modsDoneDetail",
+                new() { ["n"] = count.ToString(), ["ms"] = $"{ItsLoading.Sw.ElapsedMilliseconds}ms" }));
 
         Log.Warn($"[ItsLoading] [{n}/{ItsLoading.Timeline.Total}] {id} -> {mod.state} " +
                  $"+{delta}ms frame={Engine.GetFramesDrawn()}");
@@ -86,5 +111,45 @@ internal static class LoaderPatches
         {
             Log.Warn($"[ItsLoading] all mods processed @ +{ItsLoading.Sw.ElapsedMilliseconds}ms");
         }
+    }
+
+    // ---- mod 加载内部子步骤(仅活动日志;冻结期间在日志里积累,帧恢复后可见) ----
+
+    private static void BeforeInitializer(Type initializerType)
+    {
+        _initStartTicks = ItsLoading.Sw.ElapsedTicks;
+        ItsLoading.Timeline?.Activity(
+            I18n.T("bar.initializing", new() { ["type"] = initializerType.Name }));
+    }
+
+    private static void AfterInitializer(Type initializerType)
+    {
+        long end = ItsLoading.Sw.ElapsedTicks;
+        long ms = (long)((end - _initStartTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
+        ItsLoading.Timeline?.ModSubStep("init " + initializerType.Name, _initStartTicks, end);
+        ItsLoading.Timeline?.Activity(I18n.T("bar.initialized", new()
+        {
+            ["type"] = initializerType.Name,
+            ["ms"] = $"{ms}ms",
+        }));
+    }
+
+    private static void BeforePackMounted(string pack)
+    {
+        _packStartTicks = ItsLoading.Sw.ElapsedTicks;
+    }
+
+    private static void AfterPackMounted(string pack)
+    {
+        long end = ItsLoading.Sw.ElapsedTicks;
+        int slash = Math.Max(pack.LastIndexOf('/'), pack.LastIndexOf('\\'));
+        string name = slash >= 0 ? pack[(slash + 1)..] : pack;
+        long ms = (long)((end - _packStartTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
+        ItsLoading.Timeline?.ModSubStep("pck " + name, _packStartTicks, end);
+        ItsLoading.Timeline?.Activity(I18n.T("bar.pckMounted", new()
+        {
+            ["name"] = name,
+            ["ms"] = $"{ms}ms",
+        }));
     }
 }

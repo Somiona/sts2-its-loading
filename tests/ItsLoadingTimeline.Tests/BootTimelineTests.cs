@@ -375,4 +375,91 @@ public class BootTimelineTests
         Assert.Contains("Slow=300ms Fast=10ms", s);
         Assert.Contains("prefix=2 postfix=2", s);
     }
+
+    [Fact]
+    public void Activity_only_changes_detail_no_progress()
+    {
+        var clock = new ScriptedClock();
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        tl.BeginMods(4, 1, "mods 1/4");
+        tl.ModStarted("mods 1/4", "mod-a");
+        int before = spy.Count;
+        float overall = spy.Last.Overall, local = spy.Last.Local;
+        var stage = spy.Last.Stage;
+
+        tl.Activity("sub-step of mod-a");
+
+        Assert.Equal(before + 1, spy.Count);
+        Assert.Equal(overall, spy.Last.Overall);   // 不推进进度条
+        Assert.Equal(local, spy.Last.Local);
+        Assert.Equal(stage, spy.Last.Stage);
+        Assert.Equal("sub-step of mod-a", spy.Last.Detail);
+        Assert.False(spy.Last.ForceDraw);
+    }
+
+    [Fact]
+    public void Activity_is_ignored_after_freeze()
+    {
+        var clock = new ScriptedClock();
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        tl.BeginMods(2, 1, "mods");
+        tl.MenuReady("done", "10ms");
+
+        tl.Activity("late");
+
+        Assert.DoesNotContain(spy, p => p.Detail == "late");
+    }
+
+    [Fact]
+    public void ModSubStep_records_span_under_current_mod_without_progress()
+    {
+        var clock = new ScriptedClock();
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        tl.BeginMods(4, 1, "mods");
+        tl.ModStarted("mods", "heavy-mod");
+        float overall = spy.Last.Overall, local = spy.Last.Local;
+
+        long start = clock.Ticks;
+        clock.AdvanceMs(1200);
+        tl.ModSubStep("init Loader", start, clock.Ticks);
+
+        var span = Assert.Single(tl.SubStepSpans);
+        Assert.Equal("heavy-mod", span.Id);
+        Assert.Equal(ItsLoading.Api.LoadPhase.ModSubStep, span.Phase);
+        Assert.Equal("init Loader", span.Detail);
+        Assert.Equal(1200.0, span.DurationMs, 1);          // 引擎时间轴上的真实时长
+        Assert.Equal(overall, spy.Last.Overall);            // 不推进进度条
+        Assert.Equal(local, spy.Last.Local);
+
+        tl.MenuReady("done", "0ms");
+        tl.ModSubStep("late", clock.Ticks, clock.Ticks);
+        Assert.Single(tl.SubStepSpans);                     // 冻结后拒写
+    }
+
+    [Fact]
+    public void RecordWorkshopScan_spans_by_observation_gaps()
+    {
+        var clock = new ScriptedClock { EngineMsec = 10_000 };
+        var tl = clock.MakeTimeline(new Spy());
+
+        tl.RecordWorkshopScan(new()
+        {
+            ("3747515571", "Remilia", 10_500.0),
+            ("3747526116", "Watcher", 10_720.0),
+            ("3747508952", "figure_Saya", 11_000.0),
+        }, endMs: 11_400.0);
+
+        Assert.Equal(3, tl.WorkshopSpans.Count);
+        Assert.Equal(220.0, tl.WorkshopSpans[0].DurationMs, 1);   // 相邻观测差分
+        Assert.Equal("Remilia", tl.WorkshopSpans[0].Detail);
+        Assert.Equal(ItsLoading.Api.LoadPhase.Prelude, tl.WorkshopSpans[0].Phase);
+        Assert.Equal(400.0, tl.WorkshopSpans[2].DurationMs, 1);   // 末项以 endMs 收尾
+
+        tl.MenuReady("done", "0ms");
+        tl.RecordWorkshopScan(new() { ("x", "", 1.0) }, 2.0);
+        Assert.Equal(3, tl.WorkshopSpans.Count);                  // 冻结后拒写
+    }
 }

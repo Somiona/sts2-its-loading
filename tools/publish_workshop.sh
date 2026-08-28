@@ -43,7 +43,31 @@ for f in src/ItsLoading/localization/*/strings.json; do
   cp "$f" "$STAGE/localization/$lang/"
 done
 
-echo "==> 生成 VDF(${ITEM_ID:+更新物品 $ITEM_ID}${ITEM_ID:-首次上传,ID 待分配})"
+echo "==> 生成 VDF($([ -n "$ITEM_ID" ] && echo "更新物品 $ITEM_ID" || echo "首次上传,ID 待分配"))"
+# 描述:VDF 只上传 en 版(Steam 按语言分条存储,zhs/zht 在工坊页面的语言页签里维护)。
+# changenote:CHANGELOG.md 的 Unreleased 区整体压缩(内部版本号不做分割),见该文件头部约定。
+vdf_escape() { # 文件 → 单行 VDF 字符串(换行→\n,引号/反斜杠转义)
+  python3 - "$1" <<'PY'
+import sys
+t = open(sys.argv[1], encoding='utf-8').read().strip()
+t = t.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+sys.stdout.write(t)
+PY
+}
+DESC_ESC=$(vdf_escape steam_desc/en.md)
+CHANGENOTE_ESC=$(python3 - CHANGELOG.md "$VERSION" <<'PY'
+import sys, re
+text = open(sys.argv[1], encoding='utf-8').read()
+m = re.search(r'^## Unreleased[ \t]*$\n?(.*?)(?=^## |\Z)',
+              text, re.S | re.M)
+body = (m.group(1) if m else '').strip()
+if not body:
+    sys.exit('CHANGELOG.md 的 Unreleased 区是空的——先写变化再发布')
+note = f'v{sys.argv[2]}:\n' + '\n'.join(l.strip() for l in body.splitlines() if l.strip())
+note = note.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+print(note, end='')
+PY
+)
 cat > "$VDF" <<EOF
 "workshopitem"
 {
@@ -53,8 +77,8 @@ cat > "$VDF" <<EOF
   "previewfile"         "$STAGE/mod_image.png"
   "visibility"          "0"
   "title"               "不再干等 · It's Loading"
-  "description"         "启动进度条:工坊读取/模组加载/启动步骤全程可见,附带启动耗时瀑布图与主题切换。A boot progress bar + startup waterfall for Slay the Spire 2. Source: https://github.com/Somiona/sts2-its-loading"
-  "changenote"          "v$VERSION:尝试修复windows崩溃问题"
+  "description"         "$DESC_ESC"
+  "changenote"          "$CHANGENOTE_ESC"
 }
 EOF
 cat "$VDF"
@@ -67,6 +91,23 @@ fi
 echo "==> 上传(密码与 Steam Guard 在提示中输入)"
 steamcmd +login "$ACCOUNT" +workshop_build_item "$VDF" +quit
 
+# 归档:Unreleased → 本次发布版本号(顶部重建空 Unreleased;内部版本号不单独成节)
+python3 - CHANGELOG.md "$VERSION" <<'PY'
+import sys, re, datetime
+p, ver = sys.argv[1], sys.argv[2]
+s = open(p, encoding='utf-8').read()
+marked = f'## [v{ver}] — {datetime.date.today().isoformat()}'
+s2, n = re.subn(r'^## Unreleased[ \t]*$', marked, s, count=1, flags=re.M)
+if n == 0:
+    print('!! CHANGELOG.md 未找到 Unreleased 区,请手动归档', file=sys.stderr)
+    sys.exit(1)
+m = re.search(r'^## ', s2, re.M)
+s2 = s2[:m.start()] + '## Unreleased\n\n' + s2[m.start():]
+open(p, 'w', encoding='utf-8').write(s2)
+print(f'==> CHANGELOG.md: Unreleased 已归档为 [v{ver}]')
+PY
+
 echo
 echo "完成。若是首次上传:把上面输出中的 Published File ID 填进 $ID_FILE,"
 echo "并在浏览器里完善工坊页面的描述/标签(banner 图等)。"
+echo "别忘了 zhs/zht 描述在工坊页面的语言页签里单独维护(steam_desc/ 下是源文件)。"

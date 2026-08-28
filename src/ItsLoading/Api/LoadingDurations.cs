@@ -14,7 +14,8 @@ namespace ItsLoading.Api
     public enum LoadPhase
     {
         Prelude,       // 引擎启动 + 工坊读取(到第一个 mod 加载前)
-        ModLoad,       // 单个 mod 的 TryLoadMod(含其初始化器)
+        ModLoad,       // 单个 mod 的 TryLoadMod 全程
+        ModSubStep,    // mod 加载内部子步骤(初始化器执行 / 资源包挂载)
         BootStep,      // Essential 启动子步骤
         AssetSession,  // 资产加载会话(按会话聚合)
     }
@@ -27,7 +28,7 @@ namespace ItsLoading.Api
     /// </summary>
     public static class LoadingDurations
     {
-        private static LoadSpan[] _frozenMods, _frozenSteps, _frozenSessions, _frozenPhases;
+        private static LoadSpan[] _frozenMods, _frozenSubSteps, _frozenWorkshop, _frozenSteps, _frozenSessions, _frozenPhases;
 
         private static BootTimeline T => ItsLoading.Timeline;
 
@@ -37,6 +38,23 @@ namespace ItsLoading.Api
         /// <summary>逐 mod 加载耗时(Id = mod id,Detail = 加载状态)。本 mod 自身不计。</summary>
         public static IReadOnlyList<LoadSpan> ModLoads =>
             Snapshot(T?.ModSpans, ref _frozenMods);
+
+        /// <summary>
+        /// 工坊扫描逐项耗时(Id = "workshop 工坊项id",Detail = mod 显示名)。
+        /// gd 在帧 0 起轮询日志观测,相邻观测差分 ≈ 单项耗时(0.1s 量化,含 Steam 查询);
+        /// 首启(脚本未就绪)或扫描早于 gd 观测时本表为空。
+        /// </summary>
+        public static IReadOnlyList<LoadSpan> WorkshopItems =>
+            Snapshot(T?.WorkshopSpans, ref _frozenWorkshop);
+
+        /// <summary>
+        /// mod 加载内部子步骤(Id = 所属 mod id,Detail = "init 类型名" / "pck 文件名")。
+        /// 覆盖 TryLoadMod 内的可挂钩点:初始化器执行(耗时大头)与资源包挂载;
+        /// 程序集加载是 BCL 方法,不单独计时(时间差含在所属 mod 的总 span 里)。
+        /// 工坊读取的内部步骤发生在 C# 之前,不在本表(见 Prelude)。
+        /// </summary>
+        public static IReadOnlyList<LoadSpan> ModSubSteps =>
+            Snapshot(T?.SubStepSpans, ref _frozenSubSteps);
 
         /// <summary>启动子步骤(图集/本地化/模型库等)。</summary>
         public static IReadOnlyList<LoadSpan> BootSteps =>

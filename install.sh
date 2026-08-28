@@ -1,9 +1,10 @@
 #!/bin/bash
-# 安装到本地游戏(默认 macOS 原生版路径,可用 GAME_DIR 覆盖)
+# 安装到本地游戏(目标优先级:GAME_DIR > .env 的 STS2_GAME_DIR > macOS 原生版默认)
 set -euo pipefail
 cd "$(dirname "$0")"
 
-GAME_DIR="${GAME_DIR:-$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2}"
+[ -f .env ] && source .env
+GAME_DIR="${GAME_DIR:-${STS2_GAME_DIR:-$HOME/Library/Application Support/Steam/steamapps/common/Slay the Spire 2}}"
 # mods 目录 = 可执行文件旁的 mods(ModManager 语义)。macOS 原生版在 .app 内,
 # 其余(Windows 原生、CrossOver/Wine 瓶内)在游戏根目录。
 if [[ -d "$GAME_DIR/SlayTheSpire2.app" ]]; then

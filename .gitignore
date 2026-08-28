@@ -23,3 +23,6 @@ dist/
 *.pyc
 __pycache__/
 busy_cursor_reference/
+
+# 本机环境配置(模板见 .env.example)
+.env

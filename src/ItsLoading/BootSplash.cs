@@ -75,6 +75,39 @@ internal static class BootSplash
             {
                 ItsLoading.Timeline?.SetBootAnchor(anchor.AsInt64());
             }
+            // 工坊扫描时序(gd 轮询观测):转成逐项 Prelude span。加法式桥扩展,
+            // 旧脚本(无 get_workshop_log)优雅跳过。
+            if (boot.HasMethod("get_workshop_log"))
+            {
+                ItsLoading.Run("read workshop timing", () =>
+                {
+                    Variant wl = boot.Call("get_workshop_log");
+                    if (wl.VariantType != Variant.Type.Array) return;
+                    var arr = wl.AsGodotArray();
+                    if (arr.Count < 2) return;
+                    double endMs = arr[0].AsDouble();
+                    var names = arr.Count > 2 && arr[2].VariantType == Variant.Type.Dictionary
+                        ? arr[2].AsGodotDictionary() : null;
+                    var entries = new System.Collections.Generic.List<(string, string, double)>();
+                    if (arr[1].VariantType == Variant.Type.Array)
+                    {
+                        foreach (Variant e in arr[1].AsGodotArray())
+                        {
+                            var pair = e.AsGodotArray();
+                            if (pair.Count < 2) continue;
+                            string id = pair[0].AsString();
+                            entries.Add((id,
+                                names != null && names.ContainsKey(id) ? names[id].AsString() : "",
+                                pair[1].AsDouble()));
+                        }
+                    }
+                    if (entries.Count > 0)
+                    {
+                        ItsLoading.Timeline?.RecordWorkshopScan(entries, endMs);
+                        Log.Warn($"[ItsLoading] workshop timing imported ({entries.Count} items)");
+                    }
+                });
+            }
             // 正常路径:该节点已经由 GdBridgeBar 接管,继续作为唯一 UI。
             // 首启/版本不匹配:ClassicBar(999)覆盖本节点(998),仍不在同步突发期隐藏它，
             // 避免 MoltenVK 因渲染状态变化出现黑屏间隙。
@@ -138,12 +171,12 @@ internal static class BootSplash
         "0.####", System.Globalization.CultureInfo.InvariantCulture);
 
     private const string BootSplashGdTemplate = @"extends Node
-# LoadingBar boot view — injected by ItsLoading mod. BOOT_VERSION = 13
+# LoadingBar boot view — injected by ItsLoading mod. BOOT_VERSION = 16
 # 启动时主动自检:mod 在 settings 里被禁用、或本地/工坊文件均已不存在,
 # 则不显示任何进度条,并错后 2 秒做原子自清理(避开启动期 I/O;任何时刻被强退均无害)。
 # 正常路径:与 C# 侧一致的底部条(无垫底),负责进度刻度 0 → 0.25,
 # 尾部增量跟踪 godot.log 显示工坊读取进度。
-# 桥协议(BOOT_VERSION 13 / bridge_version 2):C# 侧经 csharp_attach() 确认接管后,本节点
+# 桥协议(BOOT_VERSION 16 / bridge_version 2):C# 侧经 csharp_attach() 确认接管后,本节点
 # 成为唯一加载 UI——工坊轮询/旧 30s 安全网停用,节点保持可见且仅保留 5 分钟失联看门狗;
 # 全程呈现改由 C# 侧 csharp_present() 逐事件驱动(与 ClassicBar 同一数学与出帧配对)。
 # 退休仍走 takeover()(隐藏图层);版本协商字段 bridge_version(C# 侧见 GdBridgeBar)。
@@ -174,6 +207,10 @@ var boot_start_msec := 0
 var _lang := ""eng""
 var _strings := {}
 var _frozen := false
+# ---- 工坊扫描时序(瀑布图的「游戏预加载」块逐项拆解) ----
+var _ws_order: Array = []   # [[工坊项id, 首见引擎毫秒], ...](日志到达序)
+var _ws_names := {}         # 工坊项id → mod 显示名(清单文件基名)
+var _ws_end_msec := 0       # 扫描结束(首见 dll 加载行);0 = 未观测到
 # ---- C# 桥状态 ----
 var bridge_version := @@BRIDGE_VERSION@@
 var _bridge_attached := false
@@ -477,7 +514,7 @@ func _process(delta: float) -> void:
 		return
 	_t += delta
 	_poll_acc += delta
-	if _poll_acc >= 0.2:
+	if _poll_acc >= 0.1:
 		_poll_acc = 0.0
 		_poll_log()
 	if _steam_total <= 0:
@@ -532,14 +569,36 @@ func _handle_line(line: String) -> void:
 		if id != """" and not _seen_ids.has(id):
 			_seen_ids[id] = true
 			_steam_n += 1
-			_log_line(""workshop "" + id)
+			_ws_order.append([id, Time.get_ticks_msec()])
+			var text := _txt(""bar.workshopItem"").replace(""{id}"", id)
+			# 行内自带体积(size N, ...):大项更慢的解释,顺手带上
+			if ""size "" in line:
+				var size_str: String = line.split(""size "")[1].split("","")[0].strip_edges()
+				if size_str.is_valid_int():
+					text += "" · "" + String.num(float(size_str) / 1048576.0, 1) + "" MB""
+			_log_line(text)
 		if _steam_total < 0:
 			_steam_total = _count_workshop()
 		_set_progress(_steam_n, _steam_total, ""workshop "" + id)
+	elif ""Found mod manifest file"" in line:
+		# 工坊项内部的清单发现:给出 mod 的真实名字(比数字 id 友好)
+		var p := line.substr(line.find(""Found mod manifest file"") + len(""Found mod manifest file"")).strip_edges()
+		var slash: int = max(p.rfind(""/""), p.rfind(""\\""))
+		var base_name := p.substr(slash + 1) if slash >= 0 else p
+		var short_name: String = base_name.trim_suffix("".json"")
+		_log_line(_txt(""bar.manifestFound"").replace(""{name}"", short_name))
+		# 路径含 workshop/content/<appid>/<itemid>/…:记 id→名字,供扫描时序用
+		var parts := p.split(""/"")
+		for i in parts.size():
+			if parts[i] == ""content"" and i + 2 < parts.size() and parts[i + 2].is_valid_int():
+				_ws_names[parts[i + 2]] = short_name
+				break
 	elif ""Loading assembly DLL"" in line:
 		# 首个 mod dll 开始加载 = 同步突发立即开始、帧将停止。此处绝不能再改
 		# UI(见 _process 的 _frozen 注释)——mod 段的显示由 C# 条负责,只设冻结标志。
 		# 标志在「本会改文字的同一迭代」内生效,竞态窗口被精确关闭。
+		if _ws_end_msec == 0:
+			_ws_end_msec = Time.get_ticks_msec()
 		_frozen = true
 
 func _extract_item_id(line: String) -> String:
@@ -582,6 +641,13 @@ func _log_line(text: String) -> void:
 	var off := _log_lines.size() - _log_labels.size()
 	for i in _log_labels.size():
 		_log_labels[i].text = _log_lines[i + off] if i + off >= 0 else """"
+
+# 工坊扫描时序(C# 在 Handoff 时读取,转成瀑布图的逐项 Prelude span)。
+# 首见毫秒 = 轮询观测时刻(≈该项扫描开始,0.1s 量化);相邻差分 ≈ 单项耗时。
+# end = 首见 dll 加载行;0 = 未观测到(C# 用自身时刻兜底)。
+# 加法式扩展:旧脚本无此方法,C# HasMethod 探测后跳过,优雅降级。
+func get_workshop_log() -> Array:
+	return [_ws_end_msec, _ws_order, _ws_names]
 
 # C# 确认接管(版本协商已过)。只停工坊轮询与 shimmer,不隐藏、不替换节点;
 # _process 的接管早退见上。退休仍由 takeover() 负责(隐藏图层)。
