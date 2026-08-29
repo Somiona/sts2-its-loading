@@ -78,7 +78,7 @@ cat > "$VDF" <<EOF
   "contentfolder"       "$STAGE"
   "previewfile"         "$STAGE/mod_image.png"
   "visibility"          "0"
-  "title"               "不再干等 · It's Loading"
+  "title"               "It's Loading - Game Start Progress Bar"
   "description"         "$DESC_ESC"
   "changenote"          "$CHANGENOTE_ESC"
 }
