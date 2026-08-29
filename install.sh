@@ -19,6 +19,12 @@ cp src/ItsLoading/bin/Release/net9.0/ItsLoading.pck "$GAME_MODS/"
 cp src/ItsLoadingCompat/bin/Release/net9.0/ItsLoadingCompat.dll "$GAME_MODS/"
 cp src/ItsLoading/ItsLoading.json "$GAME_MODS/"
 cp src/ItsLoading/mod_image.png "$GAME_MODS/"
+# 素材版权声明(狐狸 LGPL-2.1 出处 + logo AI 生成说明)
+cp LICENSE_CLAIM.md "$GAME_MODS/"
+# minespire 主题素材(主题各自的文件夹内;gd 帧 0 经 _mod_dir() 读取)
+#   fox_running.png —— 奔跑狐狸(NeoForged/FancyModLoader,LGPL-2.1)
+cp src/ItsLoading/Themes/Minespire/fox_running.png "$GAME_MODS/"
+cp src/ItsLoading/Themes/Minespire/mc_style_sts2_logo.png "$GAME_MODS/"
 # 只松散复制各语言的 strings.json(gd/C# 运行时读磁盘);settings_ui.json 仅走 pck,
 # 松散放置会被游戏 mod 扫描器当 manifest 报错(2026-08-28 实测)。语言列表自动化。
 mkdir -p "$GAME_MODS/localization"

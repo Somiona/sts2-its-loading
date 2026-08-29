@@ -9,17 +9,17 @@ using MegaCrit.Sts2.Core.Modding;
 namespace ItsLoading;
 
 /// <summary>
-/// v0.5 — 单一底部进度条,贯穿整个启动过程。
-/// 设计原则(吃过的亏):
+/// 单一底部进度条,贯穿整个启动过程。
+/// 设计约束:
 ///   1. 不用 Container/CenterContainer —— 其布局走 deferred 排序,同步突发期间不执行(内容挤在 0×0)
-///   2. 全部节点手动定位 —— v0.2 底部条验证过的唯一可靠模式
+///   2. 全部节点手动定位
 ///   3. gd 与 C# 渲染完全一致的样式 —— frame 0 接管无视觉跳变
 ///   4. 单一进度刻度 0→1 由 BootTimeline 拥有:工坊读取 0-0.25 / mod 加载 0.25-0.60 / Essential 0.60-0.88 / 菜单就绪 0.88-1.0(启动边界 = 菜单可交互,延迟资产不进条)
 ///
-/// 本类 = 启动编排层:Init 顺序、load-order 手术。UI 呈现在主题里(Themes/)。
+/// 本类 = 启动编排层:Init 顺序、load-order 调整。UI 呈现在主题里(Themes/)。
 /// 伴生模块:
-///   BootTimeline.cs     —— 启动时间线(#3 深模块:刻度表 + span 记录 + 冻结;钩子经它推进度)
-///   Patches/            —— Harmony 补丁族(#4:loader / boot phases / mod icon)
+///   BootTimeline.cs     —— 启动时间线(刻度表 + span 记录 + 冻结;钩子经它推进度)
+///   Patches/            —— Harmony 补丁族(loader / boot phases / mod icon)
 ///   Themes/             —— 呈现缝(持久 gd 经典双条 + 首启 C# 经典双条兜底)
 ///   BootSplash.cs       —— gd splash 自注入/交接/延迟回收(帧 0→0.25 段的呈现)
 ///   WaterfallViewer.cs  —— 瀑布图查看器(菜单就绪后的调试 UI)
@@ -35,7 +35,7 @@ public static class ItsLoading
     /// <summary>启动时间线(Init 最先创建;查询面 Api.LoadingDurations 与各补丁都经它)。</summary>
     internal static BootTimeline Timeline;
 
-    /// <summary>当前主题(#7:Init 的 build bar 步骤创建;BaseLib 设置可循环切换,下次启动生效)。</summary>
+    /// <summary>当前主题(Init 的 build bar 步骤创建;BaseLib 设置可循环切换,下次启动生效)。</summary>
     internal static ILoadingTheme Theme;
 
     public static void Init()
@@ -48,6 +48,9 @@ public static class ItsLoading
         // (Presenter 在 build bar 步骤接线到当前主题)
         Timeline = new BootTimeline(() => (long)Time.GetTicksMsec(), () => Sw.ElapsedTicks);
         Run("ensure boot splash installed", BootSplash.Install);
+        // 主题 cfg 迁移/补默认(必须在 BuildTheme 前;先于 BaseLib 加载 → 它的
+        // Load() 总能读到完整 Theme 键,不触发缺键重存)
+        Run("migrate theme cfg", ThemeRegistry.MigrateToCfg);
         int processed = 1;
         Run("ensure first in load order", () => processed = EnsureFirstInLoadOrder());
         string modStep = processed >= total
@@ -63,7 +66,7 @@ public static class ItsLoading
         // 原子交接:此刻出帧 = 一帧内完成条与条的切换。
         // 连画 3 次:主线程刚进入同步突发时,首次提交可能被 MoltenVK 丢弃
         // (实测 mods 1-4 的单次 ForceDraw 不上屏、约 mod 5 才恢复),冗余提交
-        // 让有效帧尽早出现(2026-08-27)。
+        // 让有效帧尽早出现。
         Run("first paint", () =>
         {
             for (int i = 0; i < 3; i++) RenderingServer.ForceDraw();
@@ -113,7 +116,7 @@ public static class ItsLoading
     /// 自行保存设置——因此只做内存重排,绝不自己写用户的 settings.save。
     /// (若首装后的第一次启动被强退,下次仍不完整,再下次自愈;可接受。)
     ///
-    /// ⚠️ 时机陷阱(2026-08-26 todo#1):本方法运行在游戏 Initialize 的
+    /// ⚠️ 时机陷阱:本方法运行在游戏 Initialize 的
     /// `foreach (Mod m in _mods) TryLoadMod(m)` 枚举体内(我们正是当前元素)。
     /// List&lt;T&gt; 枚举器每次 MoveNext 都校验 _version,RemoveAt/Insert 会让
     /// 下一次 MoveNext 抛 InvalidOperationException → 启动中止、mod_list 不重建,

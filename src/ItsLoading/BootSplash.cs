@@ -133,8 +133,11 @@ internal static class BootSplash
     /// 替换 token(由 BuildBootSplashGd() 用共享常量替换,勿在模板里写死):
     ///   @@MOD_ID@@ / @@AUTOLOAD_NAME@@ / @@GD_USER_PATH@@ / @@CFG_MARKER@@ —— 身份契约,
     ///   与 C# 侧常量同源(漂移 = 自清理失灵,故必须走 token)
-    ///   @@*_COLOR@@ / @@*_Y@@ / @@*_HEIGHT@@ —— ClassicBar 的样式常量,
-    ///   gd 正常路径与 C# 首启兜底共享同一真源。
+    ///   @@*_COLOR@@ / @@*_Y@@ / @@*_HEIGHT@@ 等 —— ClassicBar 的样式常量,
+    ///   gd 正常路径与 C# 首启兜底共用同一组常量。
+    ///   @@THEME_CFG_PATH@@ / @@THEME_LEGACY_PATH@@ / @@MOD_VERSION@@ / @@MS_*@@ ——
+    ///   主题配置(BaseLib cfg 为主 + 迁移期旧 txt 回退)、版本串与
+    ///   MinespireBar 布局常量(模板按主题值分支两套布局,与 ThemeRegistry 一致)。
     /// </summary>
     private static readonly string BootSplashGd = BuildBootSplashGd();
 
@@ -160,7 +163,42 @@ internal static class BootSplash
             .Replace("@@LOCAL_Y@@", GdFloat(ClassicBar.LocalY))
             .Replace("@@LOCAL_HEIGHT@@", GdFloat(ClassicBar.LocalHeight))
             .Replace("@@PULSE_MIN@@", GdFloat(ClassicBar.IndeterminateMinWidth))
-            .Replace("@@PULSE_TRAVEL@@", GdFloat(ClassicBar.IndeterminateTravel));
+            .Replace("@@PULSE_TRAVEL@@", GdFloat(ClassicBar.IndeterminateTravel))
+            // Minespire 主题:布局常量在 MinespireBar,模板不写死(同 ClassicBar)
+            .Replace("@@THEME_CFG_PATH@@", ThemeRegistry.CfgPath)
+            .Replace("@@THEME_LEGACY_PATH@@", ThemeRegistry.LegacyTxtPath)
+            .Replace("@@MOD_VERSION@@", typeof(ItsLoading).Assembly.GetName().Version?.ToString() ?? "")
+            .Replace("@@MS_BG_COLOR@@", GdColor(MinespireBar.BgColor))
+            .Replace("@@MS_TEXT_COLOR@@", GdColor(MinespireBar.TextColor))
+            .Replace("@@MS_DIM_COLOR@@", GdColor(MinespireBar.DimTextColor))
+            .Replace("@@MS_DESIGN_W@@", GdFloat(MinespireBar.DesignW))
+            .Replace("@@MS_DESIGN_H@@", GdFloat(MinespireBar.DesignH))
+            .Replace("@@MS_BAR_W@@", GdFloat(MinespireBar.BarWidth))
+            .Replace("@@MS_BAR_H@@", GdFloat(MinespireBar.BarHeight))
+            .Replace("@@MS_BARS_TOP@@", GdFloat(MinespireBar.BarsTop))
+            .Replace("@@MS_LABEL_GAP@@", GdFloat(MinespireBar.LabelGap))
+            .Replace("@@MS_BAR_GAP@@", GdFloat(MinespireBar.BarGap))
+            .Replace("@@MS_STEP_LABEL_H@@", GdFloat(MinespireBar.StepLabelH))
+            .Replace("@@MS_DETAIL_LABEL_H@@", GdFloat(MinespireBar.DetailLabelH))
+            .Replace("@@MS_BORDER_W@@", GdFloat(MinespireBar.BorderWidth))
+            .Replace("@@MS_FILL_INSET@@", GdFloat(MinespireBar.FillInset))
+            .Replace("@@MS_LOGO_Y@@", GdFloat(MinespireBar.LogoY))
+            .Replace("@@MS_LOGO_W@@", GdFloat(MinespireBar.LogoDesignW))
+            .Replace("@@MS_FALLBACK_FONT@@", MinespireBar.FallbackTitleFont.ToString())
+            .Replace("@@MS_STEP_FONT@@", MinespireBar.StepFont.ToString())
+            .Replace("@@MS_DETAIL_FONT@@", MinespireBar.DetailFont.ToString())
+            .Replace("@@MS_LOG_LEFT@@", GdFloat(MinespireBar.LogLeft))
+            .Replace("@@MS_LOG_BOTTOM@@", GdFloat(MinespireBar.LogBottom))
+            .Replace("@@MS_FOX_W@@", GdFloat(MinespireBar.FoxW))
+            .Replace("@@MS_FOX_H@@", GdFloat(MinespireBar.FoxH))
+            .Replace("@@MS_FOX_FRAMES@@", MinespireBar.FoxFrames.ToString())
+            .Replace("@@MS_FOX_FPS@@", GdFloat(MinespireBar.FoxFps))
+            .Replace("@@MS_FOX_RIGHT@@", GdFloat(MinespireBar.FoxRight))
+            .Replace("@@MS_FOX_BOTTOM@@", GdFloat(MinespireBar.FoxBottom))
+            .Replace("@@MS_VERSION_RIGHT@@", GdFloat(MinespireBar.VersionRight))
+            .Replace("@@MS_VERSION_BOTTOM@@", GdFloat(MinespireBar.VersionBottom))
+            .Replace("@@MS_CYCLE_S@@", GdFloat(MinespireBar.IndeterminateCycleSeconds))
+            .Replace("@@MS_FADE_S@@", GdFloat(MinespireBar.FadeSeconds));
 
     /// <summary>Color → GDScript 字面量(不变文化,防区域设置把小数点变逗号)。</summary>
     private static string GdColor(Color c) => string.Create(
@@ -171,11 +209,14 @@ internal static class BootSplash
         "0.####", System.Globalization.CultureInfo.InvariantCulture);
 
     private const string BootSplashGdTemplate = @"extends Node
-# LoadingBar boot view — injected by ItsLoading mod. BOOT_VERSION = 16
+# LoadingBar boot view — injected by ItsLoading mod. BOOT_VERSION = 18
 # 启动时主动自检:mod 在 settings 里被禁用、或本地/工坊文件均已不存在,
 # 则不显示任何进度条,并错后 2 秒做原子自清理(避开启动期 I/O;任何时刻被强退均无害)。
-# 正常路径:与 C# 侧一致的底部条(无垫底),负责进度刻度 0 → 0.25,
-# 尾部增量跟踪 godot.log 显示工坊读取进度。
+# 正常路径按主题(BaseLib cfg @@THEME_CFG_PATH@@;C# ThemeRegistry 读同一文件)分支布局:
+#   classic  —— 底部条(无垫底),负责进度刻度 0 → 0.25,
+#               尾部增量跟踪 godot.log 显示工坊读取进度;
+#   minespire —— 整屏红居中布局(Minecraft 风格,含右下奔跑狐狸),
+#               同样覆盖 0 → 0.25,工坊轮询逻辑两布局共用。
 # 桥协议(BOOT_VERSION 16 / bridge_version 2):C# 侧经 csharp_attach() 确认接管后,本节点
 # 成为唯一加载 UI——工坊轮询/旧 30s 安全网停用,节点保持可见且仅保留 5 分钟失联看门狗;
 # 全程呈现改由 C# 侧 csharp_present() 逐事件驱动(与 ClassicBar 同一数学与出帧配对)。
@@ -235,10 +276,32 @@ const ACTIVITY_FONT := 12
 var _log_lines: Array = []
 var _log_labels: Array = []
 var _last_log := """"
+# ---- 主题(BaseLib cfg @@THEME_CFG_PATH@@;C# ThemeRegistry 读同一文件) ----
+var _theme := ""classic""
+var _ms_root: Control          # minespire 全屏根:揭幕淡出对它做 modulate(CanvasLayer 无此属性)
+var _fill_base_x := 0.0        # 阶段条填充 x 基线(classic 0;minespire 内缩;滑块滑过后复位)
+var _fox_atlas: AtlasTexture   # 奔跑狐狸逐帧 region(素材缺席则保持 null,全流程跳过)
+
+func _read_theme() -> void:
+	# 读链:cfg 的 Theme 键(枚举名,to_lower 统一)→ 旧 txt(迁移完成前的过渡启动,
+	# C# MigrateToCfg 稍后并入并删除)→ classic。
+	# 不做白名单:未知 id 落 classic 布局(未来主题 + 旧脚本优雅降级)。
+	var p := ""@@THEME_CFG_PATH@@""
+	if FileAccess.file_exists(p):
+		var data = JSON.parse_string(FileAccess.get_file_as_string(p))
+		if data is Dictionary and data.get(""Theme"") is String:
+			_theme = str(data[""Theme""]).to_lower()
+			return
+	var legacy := ""@@THEME_LEGACY_PATH@@""
+	if FileAccess.file_exists(legacy):
+		var s := FileAccess.get_file_as_string(legacy).strip_edges().to_lower()
+		if s != """":
+			_theme = s
 
 func _ready() -> void:
 	boot_start_msec = Time.get_ticks_msec()
 	_detect_language()
+	_read_theme()
 	if _detect_state() != ""ok"":
 		_done = true
 		_cleanup_pending = true
@@ -280,7 +343,7 @@ func _load_strings() -> void:
 			_strings[k] = overlay[k]
 
 func _txt(key: String) -> String:
-	# 不叫 _t:与 shimmer 计时字段 var _t 冲突会让整个脚本解析失败(2026-08-28 实测)
+	# 不叫 _t:与 shimmer 计时字段 var _t 冲突会让整个脚本解析失败
 	return _strings.get(key, key)
 
 # ---------------- 自检与自清理 ----------------
@@ -328,7 +391,7 @@ func _settings_files() -> Array:
 # 从可执行文件目录逐级向上探测 workshop/content/2868840:
 # macOS 的 .app 布局在上方第 5 级(Contents/MacOS → …/steamapps),
 # Windows/Linux 的直接布局在第 3 级(游戏目录 → …/steamapps)。
-# 固定走 5 级在 Win/Linux 会高出 Steam 库两级,工坊检测永远失败(todo#3)。
+# 固定走 5 级在 Win/Linux 会高出 Steam 库两级,工坊检测永远失败。
 func _workshop_root() -> String:
 	var d := OS.get_executable_path().get_base_dir()
 	for i in range(8):
@@ -427,10 +490,15 @@ func _build_ui() -> void:
 	var vs: Vector2 = get_viewport().get_visible_rect().size
 	_layer = CanvasLayer.new()
 	# 正常路径中本层从帧 0 持续到菜单就绪;998 仅让首启/版本不匹配时的
-	# C# ClassicBar(999)可以无闪烁覆盖它。
+	# C# 兜底条(999)可以无闪烁覆盖它。
 	_layer.layer = 998
 	add_child(_layer)
+	if _theme == ""minespire"":
+		_build_ui_minespire(vs)
+	else:
+		_build_ui_classic(vs)
 
+func _build_ui_classic(vs: Vector2) -> void:
 	var strip := Control.new()
 	strip.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	strip.offset_top = -@@STRIP_HEIGHT@@
@@ -466,6 +534,173 @@ func _build_ui() -> void:
 		strip.add_child(l)
 		_log_labels.append(l)
 
+# ---------------- Minespire 主题布局(整屏红,854×480 设计矩形等比缩放居中) ----------------
+# 两布局产出同名引用(_step/_detail/_overall_fill/_local_fill/_track_w/_log_labels),
+# 轮询/桥/看门狗/冻结逻辑因此零分支。仍是全手动定位、不用 Container(同步突发期铁律)。
+
+func _build_ui_minespire(vs: Vector2) -> void:
+	var s: float = min(vs.x / @@MS_DESIGN_W@@, vs.y / @@MS_DESIGN_H@@)
+	var ox: float = (vs.x - @@MS_DESIGN_W@@ * s) * 0.5
+	var oy: float = (vs.y - @@MS_DESIGN_H@@ * s) * 0.5
+	_fill_base_x = @@MS_FILL_INSET@@ * s
+
+	# 全屏根 + 红底:整屏覆盖期菜单仍可交互(全家 IGNORE,纯视觉覆盖)
+	_ms_root = Control.new()
+	_ms_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_ms_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_layer.add_child(_ms_root)
+	var bg := ColorRect.new()
+	bg.color = @@MS_BG_COLOR@@
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ms_root.add_child(bg)
+
+	_ms_add_logo(s, ox, oy)
+
+	# 条块:step 标签 → 总体条 → detail 标签 → 阶段条(Minecraft 风格 labelGap/barGap 流)
+	var bar_x: float = ox + (@@MS_DESIGN_W@@ * 0.5 - @@MS_BAR_W@@ * 0.5) * s
+	var y: float = oy + @@MS_BARS_TOP@@ * s
+	_step = Label.new()
+	_step.position = Vector2(bar_x, y)
+	_step.add_theme_font_size_override(""font_size"", int(round(@@MS_STEP_FONT@@ * s)))
+	_step.add_theme_color_override(""font_color"", @@MS_TEXT_COLOR@@)
+	_step.text = _txt(""bar.starting"")
+	_step.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ms_root.add_child(_step)
+	y += (@@MS_STEP_LABEL_H@@ + @@MS_LABEL_GAP@@) * s
+	_overall_fill = _ms_add_bar(Vector2(bar_x, y), s)
+	_overall_fill.color = Color(1, 1, 1, 0.75)
+	y += (@@MS_BAR_H@@ + @@MS_BAR_GAP@@) * s
+	_detail = Label.new()
+	_detail.position = Vector2(bar_x, y)
+	_detail.add_theme_font_size_override(""font_size"", int(round(@@MS_DETAIL_FONT@@ * s)))
+	_detail.add_theme_color_override(""font_color"", @@MS_DIM_COLOR@@)
+	_detail.text = ""engine boot""
+	_detail.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ms_root.add_child(_detail)
+	y += (@@MS_DETAIL_LABEL_H@@ + @@MS_LABEL_GAP@@) * s
+	_local_fill = _ms_add_bar(Vector2(bar_x, y), s)
+	# 填充契约同 classic:fill 宽 = _track_w × 分数;minespire 的 _track_w 是内缩后的净宽
+	_track_w = (@@MS_BAR_W@@ - 2.0 * @@MS_FILL_INSET@@) * s
+
+	# 活动日志:左下角,最新在底部,越旧越淡(行高/字号常量与 classic 共用)
+	for i in ACTIVITY_LINES:
+		var l := Label.new()
+		l.position = Vector2(ox + @@MS_LOG_LEFT@@ * s,
+				oy + (@@MS_DESIGN_H@@ - @@MS_LOG_BOTTOM@@ - float(ACTIVITY_LINES - i) * ACTIVITY_LINE_H) * s)
+		l.add_theme_font_size_override(""font_size"", int(round(ACTIVITY_FONT * s)))
+		l.add_theme_color_override(""font_color"",
+			Color(1, 1, 1, 0.3 + 0.65 * float(i + 1) / ACTIVITY_LINES))
+		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_ms_root.add_child(l)
+		_log_labels.append(l)
+
+	_ms_add_fox(s, ox, oy)
+	_ms_add_version(s, ox, oy)
+
+# 主题素材统一加载(mod 目录;缺席/损坏返回 null,调用方各自优雅降级)
+func _ms_load_texture(path: String) -> ImageTexture:
+	if not FileAccess.file_exists(path):
+		return null
+	var img := Image.new()
+	if img.load_png_from_buffer(FileAccess.get_file_as_bytes(path)) != OK:
+		return null
+	return ImageTexture.create_from_image(img)
+
+func _ms_add_logo(s: float, ox: float, oy: float) -> void:
+	# MC 风格游戏 logo(设计宽 @@MS_LOGO_W@@、高按图比例,水平居中);
+	# 素材缺席回退同位文字标题——主题不因缺图失败。
+	var tex: ImageTexture = null
+	var mod_dir := _mod_dir()
+	if mod_dir != """":
+		tex = _ms_load_texture(mod_dir.path_join(""mc_style_sts2_logo.png""))
+	if tex == null:
+		var title := Label.new()
+		title.text = ""SLAY THE SPIRE 2""
+		title.position = Vector2(ox, oy + @@MS_LOGO_Y@@ * s)
+		title.size = Vector2(@@MS_DESIGN_W@@ * s, (@@MS_FALLBACK_FONT@@ + 6.0) * s)
+		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		title.add_theme_font_size_override(""font_size"", int(round(@@MS_FALLBACK_FONT@@ * s)))
+		title.add_theme_color_override(""font_color"", @@MS_TEXT_COLOR@@)
+		title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_ms_root.add_child(title)
+		return
+	var w: float = @@MS_LOGO_W@@ * s
+	var h: float = w * tex.get_height() / max(1.0, float(tex.get_width()))
+	var logo := TextureRect.new()
+	# 钳制陷阱:默认 KEEP_SIZE 的最小尺寸=贴图尺寸;texture/
+	# position 赋值把控件顶到该最小尺寸后,size 再赋也会被旧 min 钳住(2046px
+	# logo 原样进小窗口)。必须在设 texture 之前 IGNORE_SIZE,最小尺寸全程为 0。
+	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	logo.texture = tex
+	logo.position = Vector2(ox + (@@MS_DESIGN_W@@ * s - w) * 0.5, oy + @@MS_LOGO_Y@@ * s)
+	logo.stretch_mode = TextureRect.STRETCH_SCALE
+	logo.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	logo.size = Vector2(w, h)
+	_ms_root.add_child(logo)
+
+func _ms_add_bar(pos: Vector2, s: float) -> ColorRect:
+	# 2px 白描边空心 + 内缩 4px 白填充:Minecraft 风格 nine-slice 条的逐像素复刻
+	# (progress_bar_bg/fg 本就是纯二色像素画,无需贴图)
+	var sb := StyleBoxFlat.new()
+	sb.border_color = @@MS_TEXT_COLOR@@
+	sb.draw_center = false
+	sb.set_border_width_all(int(round(@@MS_BORDER_W@@ * s)))
+	var outline := Panel.new()
+	outline.position = pos
+	outline.size = Vector2(@@MS_BAR_W@@ * s, @@MS_BAR_H@@ * s)
+	outline.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	outline.add_theme_stylebox_override(""panel"", sb)
+	_ms_root.add_child(outline)
+	var fill := ColorRect.new()
+	fill.position = Vector2(@@MS_FILL_INSET@@ * s, @@MS_FILL_INSET@@ * s)
+	fill.size = Vector2(0, (@@MS_BAR_H@@ - 2.0 * @@MS_FILL_INSET@@) * s)
+	fill.color = @@MS_TEXT_COLOR@@
+	fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	outline.add_child(fill)
+	return fill
+
+func _ms_add_fox(s: float, ox: float, oy: float) -> void:
+	# 奔跑狐狸(© NeoForged contributors, LGPL-2.1,FancyModLoader):mod 目录内的
+	# 竖排 28 帧精灵,驱动在 _process(自然帧,突发期自动冻结)。素材缺席只少一只狐狸。
+	var mod_dir := _mod_dir()
+	if mod_dir == """":
+		return
+	var sheet := _ms_load_texture(mod_dir.path_join(""fox_running.png""))
+	if sheet == null:
+		return
+	_fox_atlas = AtlasTexture.new()
+	_fox_atlas.atlas = sheet
+	_fox_atlas.region = Rect2(0, 0, @@MS_FOX_W@@, @@MS_FOX_H@@)
+	var fox := TextureRect.new()
+	fox.expand_mode = TextureRect.EXPAND_IGNORE_SIZE  # 同 logo:须在 texture 之前,防最小尺寸钳制(s<1 时狐狸也中招)
+	fox.texture = _fox_atlas
+	fox.position = Vector2(ox + (@@MS_DESIGN_W@@ - @@MS_FOX_RIGHT@@ - @@MS_FOX_W@@) * s,
+			oy + (@@MS_DESIGN_H@@ - @@MS_FOX_BOTTOM@@ - @@MS_FOX_H@@) * s)
+	fox.stretch_mode = TextureRect.STRETCH_SCALE
+	fox.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	fox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fox.size = Vector2(@@MS_FOX_W@@ * s, @@MS_FOX_H@@ * s)
+	_ms_root.add_child(fox)
+
+func _ms_add_version(s: float, ox: float, oy: float) -> void:
+	var ver := Label.new()
+	ver.text = ""It's Loading v@@MOD_VERSION@@""
+	ver.position = Vector2(ox + (@@MS_DESIGN_W@@ - @@MS_VERSION_RIGHT@@ - 300.0) * s,
+			oy + (@@MS_DESIGN_H@@ - @@MS_VERSION_BOTTOM@@ - 16.0) * s)
+	ver.size = Vector2(300.0 * s, 16.0 * s)
+	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	ver.add_theme_font_size_override(""font_size"", int(round(12.0 * s)))
+	ver.add_theme_color_override(""font_color"", @@MS_DIM_COLOR@@)
+	ver.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ms_root.add_child(ver)
+
+func _ms_slide_local() -> void:
+	# Minecraft 风格不定进度语义:1/4 宽滑块左→右滚动一周(非回弹),驱动在 _process
+	_local_fill.size.x = _track_w * 0.25
+	_local_fill.position.x = _fill_base_x + fposmod(_t / @@MS_CYCLE_S@@, 1.0) * _track_w * 0.75
+
 func _add_bar(strip: Control, y: float, height: float, fill_color: Color) -> ColorRect:
 	var track := ColorRect.new()
 	track.position = Vector2(@@PAD@@, y)
@@ -488,19 +723,29 @@ func _process(delta: float) -> void:
 	_elapsed += delta
 	if _cleanup_pending and not _cleaned and _elapsed >= CLEANUP_DELAY:
 		_do_cleanup()
+	# 狐狸逐帧:放在所有早退路径之前(自然帧驱动;突发期 _process 不跑 → 冻结,
+	# 与 shimmer 同语义)。retire 后不再推进(_done 时画面本就将隐)。
+	if _fox_atlas != null and not _done:
+		_fox_atlas.region = Rect2(0.0,
+			float(int(_elapsed * @@MS_FOX_FPS@@) % int(@@MS_FOX_FRAMES@@)) * @@MS_FOX_H@@,
+			@@MS_FOX_W@@, @@MS_FOX_H@@)
 	if _done:
 		return
 	if _bridge_attached:
-		# C# 正常驱动两条;无可测局部总量时只在自然帧上跑轻量 pulse。
+		# C# 正常驱动两条;无可测局部总量时只在自然帧上跑轻量动画。
 		_t += delta
 		if _local_indeterminate:
-			var w: float = @@PULSE_MIN@@ + abs(fmod(_t * 0.8, 2.0) - 1.0) * @@PULSE_TRAVEL@@
-			_local_fill.size.x = min(w, _track_w)
+			if _theme == ""minespire"":
+				_ms_slide_local()
+			else:
+				var w: float = @@PULSE_MIN@@ + abs(fmod(_t * 0.8, 2.0) - 1.0) * @@PULSE_TRAVEL@@
+				_local_fill.size.x = min(w, _track_w)
 		elif _smooth_progress:
 			_overall_display = move_toward(_overall_display, _overall_target, delta * SMOOTH_SPEED)
 			_local_display = move_toward(_local_display, _local_target, delta * SMOOTH_SPEED)
 			_overall_fill.size.x = _track_w * _overall_display
 			_local_fill.size.x = _track_w * _local_display
+			_local_fill.position.x = _fill_base_x
 		if Time.get_ticks_msec() - _bridge_last_present_msec > BRIDGE_WATCHDOG_MSEC:
 			print(""[LoadingBarBoot] bridge watchdog expired — dismissing stale boot view"")
 			takeover()
@@ -508,7 +753,7 @@ func _process(delta: float) -> void:
 	if _frozen:
 		# 同步突发已开始(首个 mod dll 加载,帧停止流动):冻结一切 UI 变更。
 		# 阻塞瞬间若存在未提交的文字变更(字形重排异步),已呈现帧会被渲染端
-		# 失效 → prelude 与 C# 条之间黑屏(2026-08-26 实测间歇复现)。30s 安全网仍生效。
+		# 失效 → prelude 与 C# 条之间黑屏(实测间歇复现)。30s 安全网仍生效。
 		if _elapsed > 30.0:
 			takeover()
 		return
@@ -518,8 +763,11 @@ func _process(delta: float) -> void:
 		_poll_acc = 0.0
 		_poll_log()
 	if _steam_total <= 0:
-		var w: float = @@PULSE_MIN@@ + abs(fmod(_t * 0.8, 2.0) - 1.0) * @@PULSE_TRAVEL@@
-		_local_fill.size.x = min(w, _track_w)
+		if _theme == ""minespire"":
+			_ms_slide_local()
+		else:
+			var w: float = @@PULSE_MIN@@ + abs(fmod(_t * 0.8, 2.0) - 1.0) * @@PULSE_TRAVEL@@
+			_local_fill.size.x = min(w, _track_w)
 	if _elapsed > 30.0:
 		takeover()
 
@@ -532,6 +780,7 @@ func _set_progress(n: int, total: int, detail: String) -> void:
 		_local_target = local
 		_overall_fill.size.x = _track_w * _overall_display
 		_local_fill.size.x = _track_w * _local_display
+		_local_fill.position.x = _fill_base_x
 		var name := _txt(""bar.workshop"").replace(""{n}"", str(n)).replace(""{t}"", str(total))
 		_step.text = _stage_text(1, name)
 		_detail.text = detail
@@ -679,12 +928,16 @@ func csharp_present(overall: float, local: float, stage: int,
 	if _local_indeterminate:
 		_overall_display = _overall_target
 		_overall_fill.size.x = _track_w * _overall_display
-		_local_fill.size.x = min(@@PULSE_MIN@@, _track_w)
+		if _theme == ""minespire"":
+			_local_fill.size.x = _track_w * 0.25
+		else:
+			_local_fill.size.x = min(@@PULSE_MIN@@, _track_w)
 	elif stage_changed or not _smooth_progress:
 		_overall_display = _overall_target
 		_overall_fill.size.x = _track_w * _overall_display
 		_local_display = _local_target
 		_local_fill.size.x = _track_w * _local_display
+		_local_fill.position.x = _fill_base_x
 	_step.text = _stage_text(stage, step)
 	_detail.text = detail
 	# 活动日志:阶段切换记里程碑;否则记 detail——mod 的 prefix/postfix 各一行
@@ -698,8 +951,21 @@ func takeover() -> void:
 	if _done:
 		return
 	_done = true
-	if _layer:
+	# 帧死检测:_frozen 在首个 mod dll 加载时置位且永不复位,接管后仍为 true——
+	# 真正帧死的只有「冻结早退分支的 30s 安全网」(_frozen 且未接管)这一个调用点,
+	# 那里 tween 永不推进,必须立即隐藏;其余路径(看门狗/菜单就绪)帧都在流动。
+	var frames_alive := not _frozen or _bridge_attached
+	if _ms_root != null and frames_alive:
+		# minespire 揭幕淡出;classic(_ms_root 为 null)保持立即隐藏不变
+		var tw := create_tween()
+		tw.tween_property(_ms_root, ""modulate:a"", 0.0, @@MS_FADE_S@@)
+		tw.finished.connect(_ms_hide)
+	elif _layer:
 		_layer.visible = false
 	print(""[LoadingBarBoot] splash dismissed at frame "", Engine.get_frames_drawn())
+
+func _ms_hide() -> void:
+	if _layer:
+		_layer.visible = false
 ";
 }

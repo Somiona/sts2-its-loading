@@ -6,7 +6,7 @@ namespace ItsLoading;
 
 // ---------------------------------------------------------------- 持久 gd 启动视图适配器
 //
-// 证明:帧 0 起就在场的 LoadingBarBoot gd 节点可以独占全程加载 UI——
+// 帧 0 起就在场的 LoadingBarBoot gd 节点独占全程加载 UI——
 // C# 不再造 ClassicBar,BootTimeline 的快照原样转发给该节点。
 //
 // 协议(与 BootSplash.cs 模板内 gd 侧成对,破坏性变更必须双侧同步升版本):

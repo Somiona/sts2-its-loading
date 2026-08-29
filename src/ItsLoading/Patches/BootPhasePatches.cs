@@ -8,14 +8,14 @@ using MegaCrit.Sts2.Core.Logging;
 namespace ItsLoading;
 
 // ---------------------------------------------------------------- 启动阶段补丁
-// Harmony id: com.somiona.sts2.itsloading.boot(架构拆分 #4:注册 + 钩子同居一族文件)
+// Harmony id: com.somiona.sts2.itsloading.boot
 // 步骤/会话/路标三类钩子 + 会话队列反射读取;分数与 span 记录在 BootTimeline。
 // 反射字段访问是版本脆弱点(游戏更新改字段名则优雅跳过,见 CacheSessionFields)。
 
 internal static class BootPhasePatches
 {
     // ---- 启动子步骤 patch 目标(Essential 同步长黑屏期间的 checkpoints) ----
-    // 刻度分数的唯一真源在 BootTimeline.StepFractions;此处只留定位信息(Type/Method)与 join 键(Label)。
+    // 刻度分数集中在 BootTimeline.StepFractions;此处只留定位信息(Type/Method)与 join 键(Label)。
     private static readonly (string Type, string Method, string Label)[] Steps =
     {
         ("MegaCrit.Sts2.Core.Assets.AtlasManager", "LoadEssentialAtlases", "step.atlas"),

@@ -1,7 +1,7 @@
 using ItsLoading;
 using Xunit;
 
-// gd 桥的线上契约回归(纯函数部分;节点交互已有真机验证):
+// gd 桥的契约回归(纯函数部分;节点交互不在单测范围):
 //   版本门槛 —— 调用形状精确匹配 v2
 
 public sealed class GdBridgeBarTests

@@ -7,7 +7,7 @@ using MegaCrit.Sts2.Core.Modding;
 namespace ItsLoading;
 
 // ---------------------------------------------------------------- mod 加载链补丁
-// Harmony id: com.somiona.sts2.itsloading(架构拆分 #4:注册 + 钩子同居一族文件)
+// Harmony id: com.somiona.sts2.itsloading
 // 钩子只报事实:诊断文本就地构造,计数/分数/span 全部交给 BootTimeline。
 
 internal static class LoaderPatches
@@ -57,8 +57,7 @@ internal static class LoaderPatches
     private static void BeforeTryLoadMod(Mod mod)
     {
         // 缝隙归因:两次 TryLoadMod 之间是游戏的裸 foreach(无游戏代码),
-        // >100ms 即主线程被暂停——看 GC 各代回收次数是否跨缝增加(2026-08-28
-        // 实测 RitsuLib 前有 ~1s 空档,RegentFX/BetterModMenu 处 delta==span 证明测量无误)
+        // >100ms 即主线程被暂停——看 GC 各代回收次数是否跨缝增加。
         long now = ItsLoading.Sw.ElapsedMilliseconds;
         if (_lastMs > 0 && now - _lastMs > 100)
         {

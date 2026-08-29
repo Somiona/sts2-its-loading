@@ -7,6 +7,13 @@ changenote 随版本号发出,上传成功后自动把该区改标为发布的�
 
 ## Unreleased
 
+- 新主题来啦! Minespire: Minecraft 风格的整屏红底居中双条。在设置里选择,下次启动生效喵
+  - A new theme has arrived~ Minespire: a Minecraft-style full-screen red with centered dual bars, the activity log moved to the bottom-left, and a little running fox in the bottom-right corner, gently fading out when boot completes. Pick it in the settings, active from the next launch nya
+- 主题切换从循环按钮换成了下拉框,一眼选中想要的那款,不用再连着点了喵
+  - Theme switching is now a dropdown instead of a cycle button — pick the one you want at a glance, no more tapping through nya
+- 小狐狸是 NeoForge 项目的开源素材,谢谢他们的贡献喵
+  - The fox comes from the NeoForge project's open-source assets, thanks for sharing nya
+
 ## [v0.15.13] — 2026-08-29
 
 - 进度条升级成双条啦～上面看整体进度,下面看当前阶段,一眼就知道加载到哪了喵

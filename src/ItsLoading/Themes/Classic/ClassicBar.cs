@@ -4,18 +4,18 @@ using MegaCrit.Sts2.Core.Logging;
 
 namespace ItsLoading;
 
-// ---------------------------------------------------------------- 默认主题:经典底部条(架构拆分 #7 自 ItsLoading.cs 原样搬迁)
+// ---------------------------------------------------------------- 默认主题:经典底部条
 //
-// 设计原则(吃过的亏,v0.2 起验证):
+// 设计约束:
 //   1. 不用 Container/CenterContainer —— 其布局走 deferred 排序,同步突发期间不执行(内容挤在 0×0)
-//   2. 全部节点手动定位 —— 唯一可靠模式
+//   2. 全部节点手动定位
 //   3. gd splash(0→0.25 段)与本条样式一致 —— frame 0 接管无视觉跳变
 
 internal sealed class ClassicBar : ILoadingTheme
 {
-    // ---- 经典主题唯一真源 ----
+    // ---- 经典主题样式常量 ----
     // BootSplash 生成 gd 脚本时将这些颜色与几何常量全部插值进去；首启 C# 兜底
-    // 与帧 0 gd 视图因此不会再靠人工维持两份布局。
+    // 与帧 0 gd 视图因此共用同一组值,无需人工维持两份布局。
     internal static readonly Color BarTrackColor = new(1f, 1f, 1f, 0.15f);        // 轨道
     internal static readonly Color BarDetailColor = new(0.62f, 0.64f, 0.70f, 1f); // 细节文字
     internal static readonly Color BarFillColor = new(0.2f, 0.85f, 0.9f, 1f);     // 填充
@@ -53,9 +53,8 @@ internal sealed class ClassicBar : ILoadingTheme
         _layer = new CanvasLayer { Layer = 999 };
 
         // 定位容器 + 不透明黑垫底(上下各溢出 2px 盖严):
-        // v0.13.x 双条并存期间,gd 条(998,冻结在「52/52」)一直在本条(999)下面渲染,
-        // 两条都是透明设计时文字会交叠(用户可见的"gd 残留")。C# 条一旦开始出帧,
-        // 同几何黑底即完全遮住 gd 条——交接时刻无论早晚都无缝(2026-08-27)。
+        // 本条(999)叠加在 gd 条(998)上方渲染,透明设计会让两层文字交叠;
+        // 同几何黑底一旦出帧即完全遮住 gd 条——交接时刻无论早晚都无缝。
         var strip = new Control();
         strip.SetAnchorsPreset(Control.LayoutPreset.BottomWide);
         strip.OffsetTop = -StripHeight;

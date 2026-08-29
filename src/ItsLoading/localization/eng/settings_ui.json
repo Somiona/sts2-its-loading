@@ -2,6 +2,7 @@
   "ITSLOADING-mod_title": "It's Loading",
   "ITSLOADING-OPEN_WATERFALL.title": "Startup waterfall",
   "ITSLOADING-VIEW.title": "View",
-  "ITSLOADING-NEXT_THEME.title": "Loading theme (cycles, applies next launch)",
-  "ITSLOADING-SWITCH.title": "Switch"
+  "ITSLOADING-THEME.title": "Loading theme (applies next launch)",
+  "ITSLOADING-THEME.Classic": "Classic",
+  "ITSLOADING-THEME.Minespire": "Minespire"
 }

@@ -23,6 +23,13 @@
 
 <sub>现在打开游戏不用看着黑屏一直傻等着了。</sub>
 
+## 主题
+
+在 mod 设置里可以用下拉框选择加载主题(下次启动生效):
+
+- **经典**:底部双条 + 活动日志,低调不打扰
+- **Minespire**:整屏红底的居中布局,标签在条上方、活动日志挪到左下角,顶部是像素风游戏 logo,右下角还有一只奔跑的小狐狸——Minecraft 风格的启动画面,加载完成后轻轻淡出揭幕
+
 ## 安装
 
 **Steam 创意工坊**: 订阅即用。
@@ -70,6 +77,13 @@ This mod shows a progress bar during game startup, telling you **what is actuall
 
 <sub>No more staring at a black screen while the game boots.</sub>
 
+## Themes
+
+Two loading themes, selectable via a dropdown in the mod settings (applies from the next launch):
+
+- **Classic**: the bottom dual-bar strip with the activity log
+- **Minespire**: a full-screen red centered layout — labels above each bar, the activity log moved to the bottom-left corner, a pixel-style game logo on top, and a little running fox in the bottom-right — a Minecraft-style boot screen, gently fading out when the boot completes
+
 ## Install
 
 **Steam Workshop**: subscribe and play.
@@ -93,6 +107,13 @@ Turn it off in the in-game mod menu, unsubscribe, or delete the mod folder — w
 ## Known Limitations
 
 - Workshop reading counts come from the game log and may occasionally lag a little
+
+---
+
+## 鸣谢 / Credits
+
+- Minespire 主题的奔跑狐狸动画来自 [NeoForged/FancyModLoader](https://github.com/neoforged/FancyModLoader),采用 LGPL-2.1 授权,感谢 NeoForged 与贡献者们;主题 logo 为 AI 生成图像。详见 [LICENSE_CLAIM.md](LICENSE_CLAIM.md)
+- The running fox animation in the Minespire theme is from [NeoForged/FancyModLoader](https://github.com/neoforged/FancyModLoader) (LGPL-2.1). Thanks to NeoForged and its contributors; the theme logo is an AI-generated image. See [LICENSE_CLAIM.md](LICENSE_CLAIM.md)
 
 ---
 

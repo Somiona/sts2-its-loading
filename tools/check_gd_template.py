@@ -2,9 +2,9 @@
 """gd 启动脚本模板静态门禁(build.sh 构建门禁)。
 
 BootSplash.cs 的 BootSplashGdTemplate 是 C# verbatim 字符串(@"..."):
-GDScript 里的一个 `"` 必须写成 `""`。2026-08-29 实机事故:模板里空串只写了
-两个引号,生成物变成裸引号 → 整个脚本 Parse Error → autoload 实例化失败,
-gd 段从帧 0 起全灭(C# 测试与 @@token@@ 检查都查不出这一类损伤)。
+GDScript 里的一个 `"` 必须写成 `""`。转义一旦断裂,生成物会出现裸引号 →
+整个脚本 Parse Error → autoload 实例化失败,gd 段从帧 0 起全灭
+(C# 测试与 @@token@@ 检查都查不出这一类损伤)。
 
 检查项(不依赖 C# 常量真值,直接在模板文本上验证):
   1. 模板中每个 @@TOKEN@@ 在 BuildBootSplashGd() 里有对应 Replace 调用

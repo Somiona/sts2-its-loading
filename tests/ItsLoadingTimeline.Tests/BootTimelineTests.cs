@@ -4,8 +4,8 @@ using System.Diagnostics;
 using ItsLoading;
 using Xunit;
 
-// 启动时间线数学的离线回归:这里每一条断言对应历史上真出过 bug 的区域——
-// mod 段公式、步骤分数与相邻差分、会话插值与空会话(todo#5)、锚点兜底(todo#6)。
+// 启动时间线数学的离线回归:
+// mod 段公式、步骤分数与相邻差分、会话插值与空会话、锚点兜底。
 
 internal sealed class Spy : List<LoadingViewState>
 {
@@ -235,7 +235,7 @@ public class BootTimelineTests
 
         tl.SessionAdvanced(new object(), "IntroLogo", 0, 0, null, "a", (t, item) => $"0/{t}");
 
-        Assert.Equal(0.70f, spy.Last.Overall, 5);           // todo#5:0/0 按已完成,不产生 NaN
+        Assert.Equal(0.70f, spy.Last.Overall, 5);           // 0/0 按已完成,不产生 NaN
         Assert.Empty(tl.SessionSpans);                   // Total=0 不记 span
     }
 
@@ -300,7 +300,7 @@ public class BootTimelineTests
 
         tl.MenuReady("done", "x");
 
-        Assert.Equal(9_123.0, tl.TotalBootMs, 1);        // todo#6:不再 -1
+        Assert.Equal(9_123.0, tl.TotalBootMs, 1);        // 无锚点:用引擎当前时刻
         Assert.True(tl.Frozen);
     }
 

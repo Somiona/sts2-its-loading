@@ -8,19 +8,18 @@ using System.Text;
 
 namespace ItsLoading;
 
-// ---------------------------------------------------------------- 启动时间线(架构拆分 #3 的深模块)
+// ---------------------------------------------------------------- 启动时间线
 //
 // 单一写缝:Harmony 钩子只报事实(mod/步骤/会话/路标),本类拥有——
-//   · 0→1 进度刻度表(Steps 分数、SessionRanges 子区间、路标分数)——唯一真源
+//   · 0→1 进度刻度表(Steps 分数、SessionRanges 子区间、路标分数)
 //   · 全部 span 记录(Api.LoadingDurations 是它的只读查询面)
 //   · 锚点与时钟换算(EngineOffset、BootAnchor、TotalBootMs)
 //   · 冻结语义(菜单就绪后数据封存)
 // 呈现为推模型:每个事件发布一份完整 LoadingViewState(全程 + 当前阶段双进度)
-// 给 Presenter——这也是主题缝的时钟
-// (诚实动画:Present 调用密度 = 真实加载活动密度,见 CONTEXT.md)。
+// 给 Presenter——这也是主题缝的时钟;Present 调用密度 = 真实加载活动密度。
 // 文案由钩子解析后传入(I18n 不进本类);纯 BCL、双时钟注入 → 可离线单测(tests/)。
 
-/// <summary>启动路标(原先散落各钩子里的 0.82/0.88/0.66 收敛于此)。</summary>
+/// <summary>启动路标。</summary>
 internal enum BootWaypoint { Logo, MenuLoad, MainMenu }
 
 internal sealed class BootTimeline
@@ -34,7 +33,7 @@ internal sealed class BootTimeline
     internal const float MainMenuAssetsEnd = 0.82f;
     internal const float IntroEnd = 0.88f;
 
-    /// <summary>启动子步骤键 → 分数。ItsLoading 侧只保留 patch 定位(Type/Method),分数真源在此。</summary>
+    /// <summary>启动子步骤键 → 分数。ItsLoading 侧只保留 patch 定位(Type/Method),分数集中在此表。</summary>
     private static readonly Dictionary<string, (float Overall, float Local)> StepFractions = new()
     {
         { "step.atlas", (ModsEnd, 0.00f) },
@@ -49,7 +48,7 @@ internal sealed class BootTimeline
     /// 菜单资产实际由 "Common" 会话加载(LoadCommonAndMainMenuAssets),但那发生在
     /// ExecuteDeferred(=条的 1.0 完成点与 Freeze 点)之后、条 2 秒弥留期内——若映射它,
     /// 会把已显示 1.0「完成」的条拽回 0.88。启动边界定在菜单就绪,延迟资产
-    /// 属启动后后台工作,不进条也不进冻结的 Api 数据(todo#4,2026-08-27)。
+    /// 属启动后后台工作,不进条也不进冻结的 Api 数据。
     /// </summary>
     private static readonly Dictionary<string, (BootStage Stage, float Start, float End)> SessionRanges = new()
     {
@@ -64,7 +63,7 @@ internal sealed class BootTimeline
         { BootWaypoint.MainMenu, EssentialEnd },
     };
 
-    // ---- 状态(原 Recorder 全部并入;主线程独占写入) ----
+    // ---- 状态(主线程独占写入) ----
 
     /// <summary>呈现回调(推模型):主题只消费完整快照。</summary>
     public Action<LoadingViewState>? Presenter;
@@ -110,7 +109,7 @@ internal sealed class BootTimeline
     {
         _engineMsec = engineMsec;
         _swTicks = swTicks;
-        // 时钟对表(原 Init 显式步骤,现随构造;必须先于任何钩子的 ToEngineMs)
+        // 时钟对表(必须先于任何钩子的 ToEngineMs)
         _engineOffsetMs = engineMsec() - swTicks() * SwTicksToMs;
     }
 
@@ -253,7 +252,7 @@ internal sealed class BootTimeline
         return Count;
     }
 
-    /// <summary>启动子步骤 prefix:查分数表、相邻差分收尾上一 step span。未知键忽略(对齐原 StepMap 早退)。</summary>
+    /// <summary>启动子步骤 prefix:查分数表、相邻差分收尾上一 step span。未知键忽略。</summary>
     internal void StepStarted(string labelKey, string stepText, string detail)
     {
         if (Frozen) return;
@@ -310,7 +309,7 @@ internal sealed class BootTimeline
             }
         }
 
-        // 除零防护(todo#5):会话首见时可能 loaded 与 remaining 同时为 0(资产批量
+        // 除零防护:会话首见时可能 loaded 与 remaining 同时为 0(资产批量
         // 加载失败时会静默丢弃非 Ok 的请求、一调用内清空完成)→ 0/0 = NaN。
         // 空会话按已完成处理。
         float local = stat.Total > 0 ? 1f - remaining / (float)stat.Total : 1f;
@@ -367,7 +366,7 @@ internal sealed class BootTimeline
         }
         else
         {
-            // 首启兜底(todo#6):注入发生在 mod 加载期、autoload 已解析完,gd 节点
+            // 首启兜底:注入发生在 mod 加载期、autoload 已解析完,gd 节点
             // 不存在 → 锚点=-1。兜底用 0 锚点:TotalBootMs=引擎至今总时长;span 的
             // StartMs 本就是绝对引擎毫秒,÷total 的分数定位自然正确(prelude 段无数据)。
             _totalBootMs = _engineMsec();

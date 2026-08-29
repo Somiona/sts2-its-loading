@@ -7,7 +7,7 @@ using MegaCrit.Sts2.Core.Modding;
 namespace ItsLoading;
 
 // ---------------------------------------------------------------- mod 菜单图标补丁
-// Harmony id: com.somiona.sts2.itsloading.icon(架构拆分 #4:注册 + 钩子同居一族文件)
+// Harmony id: com.somiona.sts2.itsloading.icon
 //
 // 游戏读图标走 ResourceLoader("res://<id>/mod_image.png"),而导出版 Godot
 // 无法加载未导入的裸 PNG(需要 BaseLib 那种 .godot/imported/*.ctex + remap 链)。

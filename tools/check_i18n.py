@@ -28,8 +28,10 @@ REQUIRED_SETTINGS_KEYS = [
     "ITSLOADING-mod_title",
     "ITSLOADING-OPEN_WATERFALL.title",
     "ITSLOADING-VIEW.title",
-    "ITSLOADING-NEXT_THEME.title",
-    "ITSLOADING-SWITCH.title",
+    "ITSLOADING-THEME.title",
+    # 下拉框枚举项(ITSLOADING-THEME.<枚举名>,缺键回退枚举原名);新增主题时同增
+    "ITSLOADING-THEME.Classic",
+    "ITSLOADING-THEME.Minespire",
 ]
 
 

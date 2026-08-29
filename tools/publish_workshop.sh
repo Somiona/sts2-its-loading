@@ -35,6 +35,11 @@ OUT=src/ItsLoading/bin/Release/net9.0
 cp "$OUT/ItsLoading.dll" "$OUT/ItsLoading.pck" "$STAGE/"
 cp src/ItsLoadingCompat/bin/Release/net9.0/ItsLoadingCompat.dll "$STAGE/"
 cp src/ItsLoading/ItsLoading.json src/ItsLoading/mod_image.png "$STAGE/"
+# 素材版权声明(狐狸 LGPL-2.1 出处 + logo AI 生成说明)
+cp LICENSE_CLAIM.md "$STAGE/"
+# minespire 主题素材(© 狐狸 NeoForged contributors, LGPL-2.1;gd 帧 0 经 _mod_dir() 读取)
+cp src/ItsLoading/Themes/Minespire/fox_running.png "$STAGE/"
+cp src/ItsLoading/Themes/Minespire/mc_style_sts2_logo.png "$STAGE/"
 # 只带各语言 strings.json(与 install.sh 一致;settings_ui.json 仅走 pck,
 # 松散放置会被游戏 mod 扫描器当 manifest 报错)
 for f in src/ItsLoading/localization/*/strings.json; do
@@ -47,8 +52,8 @@ echo "==> 生成 VDF($([ -n "$ITEM_ID" ] && echo "更新物品 $ITEM_ID" || echo
 # 描述:VDF 只上传 en 版(Steam 按语言分条存储,zhs/zht 在工坊页面的语言页签里维护)。
 # changenote:CHANGELOG.md 的 Unreleased 区整体压缩(内部版本号不做分割),见该文件头部约定。
 vdf_escape() { # 文件 → VDF 字符串值。换行保留为真实换行(steamcmd 的
-  # workshop_build_item 不解释 \n 转义,2026-08-29 实测:转义会以字面 \n 显示在
-  # 页面上);引号仍转义为 \",否则会截断字符串;内容不应含反斜杠。
+  # workshop_build_item 不解释 \n 转义,转义会以字面 \n 显示在页面上);
+  # 引号仍转义为 \",否则会截断字符串;内容不应含反斜杠。
   python3 - "$1" <<'PY'
 import sys
 t = open(sys.argv[1], encoding='utf-8').read().strip()

@@ -11,8 +11,8 @@ namespace ItsLoading;
 
 // ---------------------------------------------------------------- 瀑布图查看器(独立于启动路径)
 //
-// 架构拆分 #1 从 ItsLoading.cs 原样搬出:菜单就绪后才可打开的调试 UI,
-// 只读冻结后的 Api.LoadingDurations 数据,不参与启动路径。
+// 菜单就绪后才可打开的调试 UI,只读冻结后的 Api.LoadingDurations 数据,
+// 不参与启动路径。
 // 对外接口:RegisterInBaseLib(BaseLib 软依赖注册)+ CompatHooks(垫片回调)。
 // 类必须 public:ItsLoadingCompat.dll(另一程序集)经 CompatHooks 回调进来;
 // 其余成员 internal/private,公开面就这一个回调入口。
@@ -34,10 +34,10 @@ public static class WaterfallViewer
     /// (JIT 按方法惰性解析),不影响本 mod。
     /// BaseLib 类型只存在于独立的兼容垫片 ItsLoadingCompat.dll 中 —— 主 dll
     /// 绝不引用 BaseLib(否则 ModManager 的 assembly.GetTypes() 会在 BaseLib
-    /// 未加载时抛 ReflectionTypeLoadException,v0.11.0 的翻车根源),垫片在此刻
+    /// 未加载时抛 ReflectionTypeLoadException),垫片在此刻
     /// 手动 LoadFrom,类型解析必然成功。
     /// 首启时我们排在队尾,BaseLib 早在补丁安装前加载完,AfterModLoad 不可能
-    /// 观察到它 —— 没有兜底的话瀑布图入口要等到第二次启动才存在(2026-08-27)。
+    /// 观察到它 —— 没有兜底的话瀑布图入口要等到第二次启动才存在。
     /// </summary>
     internal static void RegisterInBaseLib()
     {
@@ -65,8 +65,8 @@ public static class WaterfallViewer
 
     /// <summary>
     /// 垫片依赖的显式解析兜底。游戏的 HandleAssemblyResolveFailure 只兜 sts2/0Harmony,
-    /// 垫片引用的 BaseLib 全链无人解析:AfterModLoad 早注册路径实测(Wine + 0.107.1,
-    /// 2026-08-28)JIT 编译 Entry.Register 时按全名绑定「已加载的」BaseLib 失败
+    /// 垫片引用的 BaseLib 全链无人解析:Wine 下实测 AfterModLoad 早注册路径中
+    /// JIT 编译 Entry.Register 时按全名绑定「已加载的」BaseLib 失败
     /// (FileNotFoundException,报错穿过 Harmony/MonoMod 的 JIT 钩子)。挂 Default ALC
     /// 的 Resolving,按简单名返回已加载实例——绑定必成,与平台/加载顺序无关;
     /// macOS 正常路径探测本就命中,此兜底不触发,零影响。
@@ -92,8 +92,11 @@ public static class WaterfallViewer
     {
         public static void OpenWaterfall() => Show();
 
-        /// <summary>BaseLib 设置里的主题循环按钮(见 ThemeRegistry.CycleNext)。</summary>
-        public static void NextTheme() => ThemeRegistry.CycleNext();
+        /// <summary>BaseLib 设置页下拉框的静态属性透传:getter 直读 cfg 文件。</summary>
+        public static LoadingTheme GetTheme() => ThemeRegistry.Current();
+
+        /// <summary>下拉框选中:setter 同步写 cfg(见 ThemeRegistry.TrySet)。</summary>
+        public static void SetTheme(LoadingTheme theme) => ThemeRegistry.TrySet(theme);
     }
 
     private static void Show()
@@ -106,7 +109,7 @@ public static class WaterfallViewer
                 Close();
                 return;
             }
-            // 阶段埋点:Wine 下原生崩溃无托管异常可捕(2026-08-28 实测,点开即死、
+            // 阶段埋点:Wine 下原生崩溃无托管异常可捕(点开即死、
             // "waterfall opened" 未达)。逐阶段一行日志,复现时最后一行即崩溃点。
             Log.Warn("[ItsLoading] wf stage 1: i18n reload");
             // 玩家可能在本次会话内切换过语言(SettingsSave.Language 是实时值)——
@@ -168,8 +171,8 @@ public static class WaterfallViewer
             tree.Root.AddChild(_waterfallLayer);
 
             // 输入接入游戏的热键栈(NHotkeyManager 挂在 NGame,菜单/局内常驻——设置页
-            // 的 TabLeft/TabRight 也走它;capstone 容器只在局内存在,菜单下是 null,
-            // 2026-08-27 实测)。阻断屏压住背后全部热键(模态语义),再压 cancel→关闭:
+            // 的 TabLeft/TabRight 也走它;capstone 容器只在局内存在,菜单下是 null)。
+            // 阻断屏压住背后全部热键(模态语义),再压 cancel→关闭:
             // LIFO 栈 + 命中即 SetInputAsHandled,ESC 不会再被背后设置页抢走;
             // IsActionPressed 匹配 NInputManager 再分发的动作名 → 自动跟随玩家改键与手柄。
             var hm = MegaCrit.Sts2.Core.Nodes.CommonUi.NHotkeyManager.Instance;
@@ -251,7 +254,7 @@ public static class WaterfallViewer
         }
         // 取「起点晚于 prelude 结束」的首个 mod 行:本 mod 自身行的起点(≈Init 开始)
         // 早于 prelude 结束(交接发生在 Init 中途),若取全表最早会让缝隙算成负数、
-        // 填补永不触发(2026-08-27 用户实测 waterfall 中无填补行)。
+        // 填补永不触发。
         double firstModStart = double.MaxValue;
         foreach (var r in rows)
         {
@@ -278,8 +281,8 @@ public static class WaterfallViewer
     {
         double total = Math.Max(1.0, Api.LoadingDurations.TotalBootMs);
         // 时间轴跨度 = 总时长 + 3s 尾部空白:滚动到头时最后一个条与刻度标签
-        // 完整可见,且终点之后留有呼吸空间(2026-08-29 用户要求)。条的锚定
-        // 分母一律用 span,而不是 total——空白是锚定区之外的固有留白。
+        // 完整可见,且终点之后留有呼吸空间。条的锚定分母一律用 span,
+        // 而不是 total——空白是锚定区之外的固有留白。
         double span = total + 3000.0;
 
         // 汇总所有 span,按时间轴排序
@@ -298,9 +301,8 @@ public static class WaterfallViewer
             : b.DurationMs.CompareTo(a.DurationMs));
         FillWaterfallGaps(rows);
 
-        // 条形区宽度:每屏 37.5s(原始 45s/屏 的 1.2 倍),超出可视宽度即横向滚动。
-        // 「每屏」按右栏可视宽度校准:总宽 - 左右边距 - 名称列 - 纵向滚动条
-        // (旧版把名称列也算进屏宽,实际每屏只有 ~28s,比例尺比标称偏密)。
+        // 条形区宽度:每屏 37.5s,超出可视宽度即横向滚动。
+        // 「每屏」按右栏可视宽度校准:总宽 - 左右边距 - 名称列 - 纵向滚动条。
         const double secondsPerScreen = 37.5;
         const float nameColW = 340f;
         double usable = Math.Max(320.0, vs.X - 96.0 - nameColW - 16.0);
@@ -399,7 +401,7 @@ public static class WaterfallViewer
 
             var name = new Label
             {
-                // 行标签(2026-08-27):Id 存 i18n key 或 mod id(公开 API 返回稳定 key/纯 id)。
+                // 行标签:Id 存 i18n key 或 mod id(公开 API 返回稳定 key/纯 id)。
                 // 显示时:mod 行查 manifest.name(游戏的 mod 列表同款,中文名存在 manifest 里);
                 // 非 mod 行查 i18n 表(step.atlas 等译出);都不命中原样透传。
                 Text = $"{WfRowLabel(s)}  {s.DurationMs / 1000.0:F2}s",
@@ -434,7 +436,7 @@ public static class WaterfallViewer
                 Color = baseColor,
                 Visible = false,
                 // 纯视觉:不吃鼠标。否则指在条内部时悬浮目标是条自身而非
-                // barArea,联动高亮只在条外沿触发(2026-08-29 实测 bug)。
+                // barArea,联动高亮只在条外沿触发。
                 MouseFilter = Control.MouseFilterEnum.Ignore,
             };
             halo.AnchorLeft = start;
