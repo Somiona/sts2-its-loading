@@ -10,6 +10,14 @@ This mod shows a progress bar during startup and tells you what is actually happ
     Which mod is being loaded, down to the millisecond
     Which boot step the game is on (atlases / localization / model database / preload…)
 
+[Themes]
+
+Several themes are available — switch between them in the mod settings. Takes effect on the next launch.
+
+[Waterfall chart]
+
+Shows how long each mod took to load during startup. Also exposes an API that other mods can read.
+
 [Notes]
 
 The progress bar for the pre-boot phase is not visible on the very first launch: the first start performs a one-time boot-screen injection (with a notice in the top-left corner). From the next launch on, the bar is visible for the entire startup.
