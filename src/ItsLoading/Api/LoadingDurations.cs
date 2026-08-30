@@ -18,6 +18,7 @@ namespace ItsLoading.Api
         ModSubStep,    // mod 加载内部子步骤(初始化器执行 / 资源包挂载)
         BootStep,      // Essential 启动子步骤
         AssetSession,  // 资产加载会话(按会话聚合)
+        Transition,    // 路标段(云同步+读档 / 开场动画 / 主菜单场景等 step 与会话之外的启动段)
     }
 
     /// <summary>
@@ -28,7 +29,7 @@ namespace ItsLoading.Api
     /// </summary>
     public static class LoadingDurations
     {
-        private static LoadSpan[] _frozenMods, _frozenSubSteps, _frozenWorkshop, _frozenSteps, _frozenSessions, _frozenPhases;
+        private static LoadSpan[] _frozenMods, _frozenSubSteps, _frozenWorkshop, _frozenSteps, _frozenSessions, _frozenPhases, _frozenWaypoints;
 
         private static BootTimeline T => ItsLoading.Timeline;
 
@@ -63,6 +64,12 @@ namespace ItsLoading.Api
         /// <summary>资产加载会话(Detail = loaded/total)。</summary>
         public static IReadOnlyList<LoadSpan> AssetSessions =>
             Snapshot(T?.SessionSpans, ref _frozenSessions);
+
+        /// <summary>路标段:Essential 完成后相邻路标之间的区段(云同步+读档、
+        /// 开场画面入场、开场动画、主菜单场景加载)。skipLogo 启动会跳过 Logo 路标,
+        /// 段相应合并。</summary>
+        public static IReadOnlyList<LoadSpan> Waypoints =>
+            Snapshot(T?.WaypointSpans, ref _frozenWaypoints);
 
         /// <summary>粗粒度阶段(前奏 / mod 加载总段)。</summary>
         public static IReadOnlyList<LoadSpan> Phases =>

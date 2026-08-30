@@ -7,6 +7,17 @@ changenote 随版本号发出,上传成功后自动把该区改标为发布的�
 
 ## Unreleased
 
+- 测试版(beta)分支现在也能完整显示启动画面的活动日志了喵～
+  - The beta branch now shows the boot screen's activity log in full as well nya
+- 瀑布图改成了分层视图,模组和内部步骤想看多细就展开多细,还有一键全部展开喵
+  - The waterfall chart is now a layered view — expand mods and their internal steps as deep as you like, plus a one-click expand-all nya
+- 瀑布图补上了以前看不见的几段空白,云同步和开场动画的耗时也画出来了喵
+  - Several previously invisible gaps in the waterfall are now drawn, including cloud sync and the intro animation nya
+- 启动画面的步骤刻度更细了,现在连读取存档的过程都能看到喵
+  - The boot screen now ticks through finer steps — you can even watch it read your saves nya
+
+## [v0.18.0] — 2026-08-31
+
 - 主题的底层整个换了个更聪明的写法,以后出新主题会快很多,三款现有主题长相不变喵
   - The theme internals were rebuilt on a much smarter foundation — future themes will arrive faster, and the three existing ones look exactly the same nya
 - 新主题来啦!经典抽卡游戏风格的主题,在设置里选择,下次启动生效喵

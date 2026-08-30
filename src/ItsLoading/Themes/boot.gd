@@ -14,6 +14,8 @@
 # 桥协议(与 C# GdBridgeBar 成对,破坏性变更双侧同步升版本):
 #   csharp_attach() / csharp_present(overall, local, stage, step, detail) /
 #   takeover() / show_hint(text) / bridge_version(实例变量)/ _done(关闭标志,C# 探测读)
+#   可选方法(C# 经 HasMethod 探测,旧脚本缺席即跳过,新增不升版):
+#   replay_boot_log() / get_workshop_log()
 #
 # C# 晚期托管:GdBridgeBar 探测失败(autoload 缺席/版本不匹配/已关闭)时,从磁盘以
 # CACHE_MODE_IGNORE 重新实例化本脚本 —— 同一份主题代码,两种宿主。
@@ -45,6 +47,7 @@ var _log_pos := -1
 var _log_buf := ""
 var _steam_n := 0
 var _seen_ids := {}
+var _seen_manifests := {}   # 已发过活动行的清单路径(实时轮询与回放共用,回放幂等)
 var _steam_total := -1
 var _poll_acc := 0.0
 var _ws_order: Array = []   # [[工坊项 id, 首见引擎毫秒], ...](日志到达序)
@@ -497,28 +500,21 @@ func _handle_line(line: String) -> void:
 			_seen_ids[id] = true
 			_steam_n += 1
 			_ws_order.append([id, Time.get_ticks_msec()])
-			var text := _txt("bar.workshopItem").replace("{id}", id)
-			# 行内自带体积(size N, ...),大项更慢时作为解释带上
-			if "size " in line:
-				var size_str: String = line.split("size ")[1].split(",")[0].strip_edges()
-				if size_str.is_valid_int():
-					text += " · " + String.num(float(size_str) / 1048576.0, 1) + " MB"
-			_log_line(text)
+			_log_line(_workshop_item_line(line))
 		if _steam_total < 0:
 			_steam_total = _count_workshop()
 		_set_progress(_steam_n, _steam_total, "workshop " + id)
 	elif "Found mod manifest file" in line:
 		# 工坊项内部的清单发现:给出 mod 的真实名字(比数字 id 友好)
 		var p := line.substr(line.find("Found mod manifest file") + len("Found mod manifest file")).strip_edges()
-		var slash: int = max(p.rfind("/"), p.rfind("\\"))
-		var base_name := p.substr(slash + 1) if slash >= 0 else p
-		var short_name: String = base_name.trim_suffix(".json")
-		_log_line(_txt("bar.manifestFound").replace("{name}", short_name))
+		if not _seen_manifests.has(p):
+			_seen_manifests[p] = true
+			_log_line(_txt("bar.manifestFound").replace("{name}", _manifest_short_name(p)))
 		# 路径含 workshop/content/<appid>/<itemid>/…:记 id→名字,供扫描时序用
 		var parts := p.split("/")
 		for i in parts.size():
 			if parts[i] == "content" and i + 2 < parts.size() and parts[i + 2].is_valid_int():
-				_ws_names[parts[i + 2]] = short_name
+				_ws_names[parts[i + 2]] = _manifest_short_name(p)
 				break
 	elif "Loading assembly DLL" in line:
 		# 首个 mod dll 开始加载 = 同步突发立即开始、帧将停止。此处绝不能再改
@@ -536,6 +532,54 @@ func _extract_item_id(line: String) -> String:
 		if parts[i] == "mod" and i + 1 < parts.size():
 			return parts[i + 1]
 	return ""
+
+
+# 工坊项活动行文案(实时轮询与回放共用):id + 行内自带的体积
+# (size N, 大项更慢时作为解释带上)
+func _workshop_item_line(line: String) -> String:
+	var text := _txt("bar.workshopItem").replace("{id}", _extract_item_id(line))
+	if "size " in line:
+		var size_str: String = line.split("size ")[1].split(",")[0].strip_edges()
+		if size_str.is_valid_int():
+			text += " · " + String.num(float(size_str) / 1048576.0, 1) + " MB"
+	return text
+
+
+func _manifest_short_name(path: String) -> String:
+	var slash: int = max(path.rfind("/"), path.rfind("\\"))
+	var base_name := path.substr(slash + 1) if slash >= 0 else path
+	return base_name.trim_suffix(".json")
+
+
+# ---------------- 前奏活动行回放(C# attach 时调用;可选协议方法) ----------------
+
+# 工坊扫描期主循环不迭代(帧在 C# 之后才流动)的启动形态下,_process 轮询
+# 零观测,前奏活动日志为空;C# 桥在场后由此方法从本次运行日志头补齐显示。
+# 幂等:与实时轮询共用 _seen_ids/_seen_manifests 去重,正常启动时这些行已
+# 发过 → no-op。只进 _log_lines —— 不计数、不推进度、不记工坊时序
+# (回放的观测时刻已失真,未计时段落在瀑布图按聚合显示)。
+func replay_boot_log() -> void:
+	if _done:
+		return
+	var f := FileAccess.open(LOG_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var text := f.get_buffer(f.get_length()).get_string_from_utf8()
+	for line in text.split("\n"):
+		_replay_line(line)
+
+
+func _replay_line(line: String) -> void:
+	if "Looking for mods to load from Steam Workshop" in line:
+		var id := _extract_item_id(line)
+		if id != "" and not _seen_ids.has(id):
+			_seen_ids[id] = true
+			_log_line(_workshop_item_line(line))
+	elif "Found mod manifest file" in line:
+		var p := line.substr(line.find("Found mod manifest file") + len("Found mod manifest file")).strip_edges()
+		if not _seen_manifests.has(p):
+			_seen_manifests[p] = true
+			_log_line(_txt("bar.manifestFound").replace("{name}", _manifest_short_name(p)))
 
 
 func _count_workshop() -> int:

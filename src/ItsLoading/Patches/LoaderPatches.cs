@@ -74,7 +74,8 @@ internal static class LoaderPatches
                 ["n"] = ItsLoading.Timeline.Count.ToString(),
                 ["t"] = ItsLoading.Timeline.Total.ToString(),
             }),
-            I18n.T("bar.loadingMod", new() { ["id"] = id }));
+            I18n.T("bar.loadingMod", new() { ["id"] = id }),
+            id);
     }
 
     private static void AfterModLoad(Mod mod)

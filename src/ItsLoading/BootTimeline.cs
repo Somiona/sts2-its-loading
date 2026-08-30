@@ -33,14 +33,20 @@ internal sealed class BootTimeline
     internal const float MainMenuAssetsEnd = 0.82f;
     internal const float IntroEnd = 0.88f;
 
-    /// <summary>启动子步骤键 → 分数。ItsLoading 侧只保留 patch 定位(Type/Method),分数集中在此表。</summary>
-    private static readonly Dictionary<string, (float Overall, float Local)> StepFractions = new()
+    /// <summary>
+    /// Essential 子步骤的执行序(两版通用,beta 在 loc 后多 AssemblyInfo)。
+    /// 刻度按「实际挂上的步骤」均分重建(见 SetEssentialSteps):某版本缺某步时
+    /// 其余步骤自动重排,不维护两套硬编码表。默认集 = 经典四步(patch 安装
+    /// 失败的兜底,也是测试基线)。
+    /// </summary>
+    private static readonly string[] EssentialStepOrder =
     {
-        { "step.atlas", (ModsEnd, 0.00f) },
-        { "step.loc", (0.615f, 0.25f) },
-        { "step.modeldb", (0.630f, 0.50f) },
-        { "step.ids", (0.645f, 0.75f) },
+        "step.atlas", "step.loc", "step.asmInfo", "step.modeldb",
+        "step.modelIdCache", "step.ids", "step.msgTypes", "step.actTypes",
     };
+
+    private static readonly string[] DefaultEssentialSteps =
+        { "step.atlas", "step.loc", "step.modeldb", "step.ids" };
 
     /// <summary>
     /// 启动期的会话名 → 阶段 + 全程条子区间。游戏内会话(房间/角色)不在此表,自动忽略。
@@ -83,6 +89,8 @@ internal sealed class BootTimeline
     private long _bootAnchorMsec = -1;
     private long _modStartTicks, _firstModTicks = -1, _lastModTicks, _lastStepTicks = -1;
     private string? _currentModId; // 当前正在加载的 mod(子步骤 span 的归属)
+    private long _boundaryTicks = -1;      // 路标段开点(-1 = 无开段)
+    private string? _boundaryLabel;        // 开段 i18n key
     private bool _menuHandled;
     private LoadingViewState _current = new(BootStage.Mods, WorkshopEnd, 0f, null, null, false);
     internal LoadingViewState Current => _current;
@@ -93,6 +101,7 @@ internal sealed class BootTimeline
     internal readonly List<Api.LoadSpan> StepSpans = new(capacity: 16);
     internal readonly List<Api.LoadSpan> SessionSpans = new(capacity: 8);
     internal readonly List<Api.LoadSpan> PhaseSpans = new(capacity: 8);
+    internal readonly List<Api.LoadSpan> WaypointSpans = new(capacity: 8);
 
     // ConditionalWeakTable:session 结束后可被 GC,不阻止回收;值对象复用,无 per-frame 分配
     private readonly ConditionalWeakTable<object, SessionStat> _sessionStats = new();
@@ -111,7 +120,28 @@ internal sealed class BootTimeline
         _swTicks = swTicks;
         // 记录双时钟偏移(必须先于任何钩子的 ToEngineMs)
         _engineOffsetMs = engineMsec() - swTicks() * SwTicksToMs;
+        StepFractions = BuildStepFractions(DefaultEssentialSteps);
     }
+
+    /// <summary>label → (Overall, Local),步骤 prefix 时刻的刻度:第 i 步从 i/N 起,EssentialCompleted 收 1.0。</summary>
+    private Dictionary<string, (float Overall, float Local)> StepFractions { get; set; }
+
+    private static Dictionary<string, (float, float)> BuildStepFractions(string[] labels)
+    {
+        var dict = new Dictionary<string, (float, float)>(labels.Length);
+        for (int i = 0; i < labels.Length; i++)
+        {
+            dict[labels[i]] = (
+                ModsEnd + (EssentialEnd - ModsEnd) * i / labels.Length,
+                (float)i / labels.Length);
+        }
+        return dict;
+    }
+
+    /// <summary>patch 安装后按实际挂上的步骤(执行序)重建刻度表。</summary>
+    internal void SetEssentialSteps(IEnumerable<string> installedLabels) =>
+        StepFractions = BuildStepFractions(
+            installedLabels.OrderBy(l => Array.IndexOf(EssentialStepOrder, l)).ToArray());
 
     private static double SwTicksToMs => 1000.0 / Stopwatch.Frequency;
     private double ToEngineMs(long swTicks) => swTicks * SwTicksToMs + _engineOffsetMs;
@@ -158,8 +188,10 @@ internal sealed class BootTimeline
             local, stepText, "", false);
     }
 
-    /// <summary>TryLoadMod prefix:在昂贵初始化前显示当前 mod，并强制提交一次。</summary>
-    internal void ModStarted(string stepText, string id)
+    /// <summary>TryLoadMod prefix:在昂贵初始化前显示当前 mod，并强制提交一次。
+    /// detail 为本地化文案(活动日志呈现),id 为裸 mod id(子步骤 span 的归属,
+    /// 与 ModLoaded 的 span Id 同源)。</summary>
+    internal void ModStarted(string stepText, string detail, string id)
     {
         if (Frozen) return;
         PrefixCalls++;
@@ -167,7 +199,7 @@ internal sealed class BootTimeline
         _modStartTicks = _swTicks();
         if (_firstModTicks < 0) _firstModTicks = _modStartTicks;
         Present(BootStage.Mods, _current.Overall, Count / (float)Total,
-            stepText, id, true);
+            stepText, detail, true);
     }
 
     /// <summary>
@@ -247,6 +279,9 @@ internal sealed class BootTimeline
                         $"{Count} mods"));
                 }
             }
+            // mod 段结束 → 首个 Essential 步骤之间的收尾(mod 列表重建/对象池/
+            // Essential 前导)开段,由 StepStarted 关闭
+            OpenBoundary("wp.postMods", nowTicks);
             Present(BootStage.Mods, ModsEnd, 1f, doneStepText, doneDetail(Count), true);
         }
         return Count;
@@ -258,6 +293,7 @@ internal sealed class BootTimeline
         if (Frozen) return;
         if (!StepFractions.TryGetValue(labelKey, out var progress)) return;
         long nowTicks = _swTicks();
+        CloseBoundary(nowTicks);
         ClosePendingStep(nowTicks);
         _lastStepTicks = nowTicks;
         lock (StepSpans)
@@ -273,6 +309,7 @@ internal sealed class BootTimeline
         if (Frozen) return;
         ClosePendingStep(_swTicks());
         _lastStepTicks = -1;
+        OpenBoundary("wp.cloudSave", _swTicks());
         Present(BootStage.Essential, EssentialEnd, 1f, null, null, true);
     }
 
@@ -317,7 +354,12 @@ internal sealed class BootTimeline
             stepText, detail(stat.Total, stat.CurrentItem), false);
     }
 
-    /// <summary>路标:Logo=0.82 / MenuLoad=0.88 / MainMenu=0.66(仅首次生效)。</summary>
+    /// <summary>
+    /// 路标:Logo=0.82 / MenuLoad=0.88 / MainMenu=0.66(仅首次生效)。
+    /// 相邻边界差分记 Transition span,覆盖 step/会话之外的启动段(云同步+读档、
+    /// 开场画面入场、开场动画、主菜单场景加载),瀑布图尾段不留观测空洞。
+    /// skipLogo 启动无 Logo 路标,段相应合并。
+    /// </summary>
     internal void Waypoint(BootWaypoint w, string stepText, string detail)
     {
         if (Frozen) return;
@@ -326,6 +368,14 @@ internal sealed class BootTimeline
             if (_menuHandled) return;
             _menuHandled = true;
         }
+        long nowTicks = _swTicks();
+        CloseBoundary(nowTicks);
+        OpenBoundary(w switch
+        {
+            BootWaypoint.MainMenu => "wp.preLogo",
+            BootWaypoint.Logo => "wp.logo",
+            _ => "wp.menuScene",
+        }, nowTicks);
         BootStage stage = w switch
         {
             BootWaypoint.MainMenu => BootStage.OpeningAssets,
@@ -359,6 +409,7 @@ internal sealed class BootTimeline
     {
         if (Frozen) return;
         ClosePendingStep(_swTicks());
+        CloseBoundary(_swTicks());
 
         if (_bootAnchorMsec >= 0)
         {
@@ -391,6 +442,25 @@ internal sealed class BootTimeline
             top.Append(' ').Append(s.Id).Append('=').Append(s.DurationMs.ToString("F0")).Append("ms");
         }
         return top.ToString();
+    }
+
+    private void OpenBoundary(string labelKey, long startTicks)
+    {
+        _boundaryTicks = startTicks;
+        _boundaryLabel = labelKey;
+    }
+
+    private void CloseBoundary(long endTicks)
+    {
+        if (_boundaryTicks < 0 || _boundaryLabel == null) return;
+        lock (WaypointSpans)
+        {
+            WaypointSpans.Add(new Api.LoadSpan(
+                _boundaryLabel, Api.LoadPhase.Transition,
+                ToEngineMs(_boundaryTicks), (endTicks - _boundaryTicks) * SwTicksToMs, ""));
+        }
+        _boundaryTicks = -1;
+        _boundaryLabel = null;
     }
 
     private void ClosePendingStep(long nowTicks)

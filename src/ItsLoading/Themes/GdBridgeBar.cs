@@ -139,6 +139,12 @@ internal sealed class GdBridgeBar : ILoadingTheme
         {
             _node.Call("show_hint", I18n.T("hint.injected"));
         }
+        // 前奏活动行回放(可选方法,旧脚本缺席即跳过):工坊扫描期主循环不迭代的
+        // 启动形态下轮询零观测,补齐活动日志;正常启动下与实时轮询共用去重,为 no-op。
+        if (_node.HasMethod("replay_boot_log"))
+        {
+            ItsLoading.Run("replay boot log", () => _node.Call("replay_boot_log"));
+        }
         Log.Warn(_lateHosted
             ? "[ItsLoading] late-hosted fresh boot view attached — theme-faithful UI for this boot"
             : "[ItsLoading] persistent gd boot view attached");

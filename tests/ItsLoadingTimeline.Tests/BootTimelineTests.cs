@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Diagnostics;
 using ItsLoading;
 using Xunit;
@@ -83,7 +84,7 @@ public class BootTimelineTests
         var tl = clock.MakeTimeline(spy);
         tl.BeginMods(4, 1, "mods");
 
-        tl.ModStarted("mods", "A");
+        tl.ModStarted("mods", "A", "A");
 
         Assert.Equal(0.25f + 0.35f / 4f, spy.Last.Overall, 5);
         Assert.Equal(0.25f, spy.Last.Local);
@@ -101,7 +102,7 @@ public class BootTimelineTests
         var tl = clock.MakeTimeline(spy);
         tl.BeginMods(4, 1, "mods"); // 自身=1,再装 3 个到 4
 
-        tl.ModStarted("mods", "A");
+        tl.ModStarted("mods", "A", "A");
         Assert.Equal(2, tl.ModLoaded("A", "Loaded", Text("A-"), "dA", "done", n => $"fin{n}"));
         Assert.Equal(0.25f + 0.35f * (2 / 4f), spy.Last.Overall, 5); // 0.425
         Assert.Equal(0.5f, spy.Last.Local);
@@ -109,11 +110,11 @@ public class BootTimelineTests
         Assert.Equal("dA", spy.Last.Detail);
         Assert.False(spy.Last.ForceDraw);
 
-        tl.ModStarted("mods", "B");
+        tl.ModStarted("mods", "B", "B");
         Assert.Equal(3, tl.ModLoaded("B", "Loaded", Text("B-"), "dB", "done", n => $"fin{n}"));
         Assert.Equal(0.25f + 0.35f * (3 / 4f), spy.Last.Overall, 5);
 
-        tl.ModStarted("mods", "C");
+        tl.ModStarted("mods", "C", "C");
         Assert.Equal(4, tl.ModLoaded("C", "Loaded", Text("C-"), "dC", "done", n => $"fin{n}"));
         Assert.True(tl.ModsDone);
         Assert.Equal(0.60f, spy.Last.Overall);            // 完成呈现
@@ -133,7 +134,7 @@ public class BootTimelineTests
         var tl = clock.MakeTimeline(new Spy());
         tl.BeginMods(2, 1, "m");
         clock.Ticks = clock.MsToTicks(1_000);           // prefix 时刻(ticks 1000ms)
-        tl.ModStarted("m", "A");
+        tl.ModStarted("m", "A", "A");
         clock.Ticks = clock.MsToTicks(1_300);           // postfix 时刻
         tl.ModLoaded("A", "Loaded", Text("x"), "d", "done", n => "f");
 
@@ -180,6 +181,37 @@ public class BootTimelineTests
 
         Assert.Single(spy);                              // 只有 BeginMods 那次
         Assert.Empty(tl.StepSpans);
+    }
+
+    [Fact]
+    public void SetEssentialSteps_evenly_rescales_installed_steps()
+    {
+        var clock = new ScriptedClock { EngineMsec = 10_000 };
+        var spy = new Spy();
+        var tl = clock.MakeTimeline(spy);
+        // beta 全量八步(asmInfo 在内)
+        tl.SetEssentialSteps(new[]
+        {
+            "step.atlas", "step.loc", "step.asmInfo", "step.modeldb",
+            "step.modelIdCache", "step.ids", "step.msgTypes", "step.actTypes",
+        });
+
+        tl.StepStarted("step.loc", "loc", "");
+        Assert.Equal(0.60f + 0.06f / 8f, spy.Last.Overall, 5);
+        Assert.Equal(1f / 8f, spy.Last.Local, 5);
+
+        tl.StepStarted("step.actTypes", "act", "");
+        Assert.Equal(0.60f + 0.06f * 7f / 8f, spy.Last.Overall, 5);
+        Assert.Equal(7f / 8f, spy.Last.Local, 5);
+
+        // 传入乱序时按执行序重排;未安装的键照旧忽略
+        var tl2 = clock.MakeTimeline(new Spy());
+        tl2.SetEssentialSteps(new[] { "step.ids", "step.atlas" });
+        tl2.StepStarted("step.atlas", "atlas", "");
+        Assert.Equal(0, tl2.Current.Local, 5);           // i=0 → 局部 0
+        tl2.StepStarted("step.ids", "ids", "");
+        Assert.Equal(0.5f, tl2.Current.Local, 5);        // i=1/2
+        tl2.StepStarted("step.msgTypes", "x", "");       // 未安装 → 忽略
     }
 
     [Fact]
@@ -361,11 +393,11 @@ public class BootTimelineTests
 
         tl.BeginMods(3, 1, "m");
         clock.Ticks = clock.MsToTicks(100);
-        tl.ModStarted("m", "Slow");
+        tl.ModStarted("m", "Slow", "Slow");
         clock.Ticks = clock.MsToTicks(400);
         tl.ModLoaded("Slow", "Loaded", Text("x"), "d", "done", n => "f");
         clock.Ticks = clock.MsToTicks(500);
-        tl.ModStarted("m", "Fast");
+        tl.ModStarted("m", "Fast", "Fast");
         clock.Ticks = clock.MsToTicks(510);
         tl.ModLoaded("Fast", "Loaded", Text("x"), "d", "done", n => "f");
 
@@ -383,7 +415,7 @@ public class BootTimelineTests
         var spy = new Spy();
         var tl = clock.MakeTimeline(spy);
         tl.BeginMods(4, 1, "mods 1/4");
-        tl.ModStarted("mods 1/4", "mod-a");
+        tl.ModStarted("mods 1/4", "mod-a", "mod-a");
         int before = spy.Count;
         float overall = spy.Last.Overall, local = spy.Last.Local;
         var stage = spy.Last.Stage;
@@ -419,7 +451,7 @@ public class BootTimelineTests
         var spy = new Spy();
         var tl = clock.MakeTimeline(spy);
         tl.BeginMods(4, 1, "mods");
-        tl.ModStarted("mods", "heavy-mod");
+        tl.ModStarted("mods", "heavy-mod", "heavy-mod");
         float overall = spy.Last.Overall, local = spy.Last.Local;
 
         long start = clock.Ticks;
@@ -461,5 +493,52 @@ public class BootTimelineTests
         tl.MenuReady("done", "0ms");
         tl.RecordWorkshopScan(new() { ("x", "", 1.0) }, 2.0);
         Assert.Equal(3, tl.WorkshopSpans.Count);                  // 冻结后拒写
+    }
+
+    [Fact]
+    public void Waypoints_record_transition_segments_between_boundaries()
+    {
+        var clock = new ScriptedClock();
+        var tl = clock.MakeTimeline(new Spy());
+
+        tl.EssentialCompleted();                                  // 开 wp.cloudSave
+        clock.AdvanceMs(1400);
+        tl.Waypoint(BootWaypoint.MainMenu, "s", "d");             // 关 cloudSave,开 preLogo
+        clock.AdvanceMs(200);
+        tl.Waypoint(BootWaypoint.Logo, "s", "d");                 // 关 preLogo,开 logo
+        clock.AdvanceMs(6600);
+        tl.Waypoint(BootWaypoint.MenuLoad, "s", "d");             // 关 logo,开 menuScene
+        clock.AdvanceMs(800);
+        tl.MenuReady("done", "d");                                // 关 menuScene
+
+        Assert.Equal(new[] { "wp.cloudSave", "wp.preLogo", "wp.logo", "wp.menuScene" },
+            tl.WaypointSpans.Select(s => s.Id));
+        Assert.All(tl.WaypointSpans, s => Assert.Equal(ItsLoading.Api.LoadPhase.Transition, s.Phase));
+        Assert.Equal(1400.0, tl.WaypointSpans[0].DurationMs, 1);
+        Assert.Equal(200.0, tl.WaypointSpans[1].DurationMs, 1);
+        Assert.Equal(6600.0, tl.WaypointSpans[2].DurationMs, 1);
+        Assert.Equal(800.0, tl.WaypointSpans[3].DurationMs, 1);
+        // 相邻段首尾相接
+        Assert.Equal(tl.WaypointSpans[0].StartMs + tl.WaypointSpans[0].DurationMs,
+            tl.WaypointSpans[1].StartMs, 1);
+    }
+
+    [Fact]
+    public void PostMods_boundary_opens_at_last_mod_and_closes_at_first_step()
+    {
+        var clock = new ScriptedClock { EngineMsec = 10_000 };
+        var tl = clock.MakeTimeline(new Spy());
+        tl.BeginMods(2, 1, "m");
+        tl.ModStarted("m", "A", "A");
+        clock.AdvanceMs(400);
+        tl.ModLoaded("A", "Loaded", Text("x"), "d", "done", n => "f");   // ModsDone → 开 wp.postMods
+        clock.AdvanceMs(300);
+        tl.StepStarted("step.atlas", "atlas", "");                       // 关 wp.postMods
+        clock.AdvanceMs(50);
+        tl.StepStarted("step.loc", "loc", "");                           // 无开段,不新增
+
+        var span = Assert.Single(tl.WaypointSpans);
+        Assert.Equal("wp.postMods", span.Id);
+        Assert.Equal(300.0, span.DurationMs, 1);
     }
 }

@@ -15,13 +15,18 @@ namespace ItsLoading;
 internal static class BootPhasePatches
 {
     // ---- 启动子步骤 patch 目标(Essential 同步长黑屏期间的 checkpoints) ----
-    // 刻度分数集中在 BootTimeline.StepFractions;此处只留定位信息(Type/Method)与 join 键(Label)。
-    private static readonly (string Type, string Method, string Label)[] Steps =
+    // 表序 = 执行序;刻度按实际挂上的步骤均分(BootTimeline.SetEssentialSteps)。
+    // Optional = 某些游戏版本没有的目标(如 beta 新增的 AssemblyInfo),缺席静默跳过。
+    private static readonly (string Type, string Method, string Label, bool Optional)[] Steps =
     {
-        ("MegaCrit.Sts2.Core.Assets.AtlasManager", "LoadEssentialAtlases", "step.atlas"),
-        ("MegaCrit.Sts2.Core.Localization.LocManager", "Initialize", "step.loc"),
-        ("MegaCrit.Sts2.Core.Models.ModelDb", "Init", "step.modeldb"),
-        ("MegaCrit.Sts2.Core.Models.ModelDb", "InitIds", "step.ids"),
+        ("MegaCrit.Sts2.Core.Assets.AtlasManager", "LoadEssentialAtlases", "step.atlas", false),
+        ("MegaCrit.Sts2.Core.Localization.LocManager", "Initialize", "step.loc", false),
+        ("MegaCrit.Sts2.Core.Modding.AssemblyInfo", "Init", "step.asmInfo", true),
+        ("MegaCrit.Sts2.Core.Models.ModelDb", "Init", "step.modeldb", false),
+        ("MegaCrit.Sts2.Core.Multiplayer.Serialization.ModelIdSerializationCache", "Init", "step.modelIdCache", false),
+        ("MegaCrit.Sts2.Core.Models.ModelDb", "InitIds", "step.ids", false),
+        ("MegaCrit.Sts2.Core.Multiplayer.Serialization.MessageTypes", "Initialize", "step.msgTypes", false),
+        ("MegaCrit.Sts2.Core.GameActions.Multiplayer.ActionTypes", "Initialize", "step.actTypes", false),
     };
 
     private static readonly Dictionary<MethodBase, string> StepMap = new();
@@ -29,17 +34,21 @@ internal static class BootPhasePatches
     internal static void Install()
     {
         var harmony = new Harmony("com.somiona.sts2.itsloading.boot");
-        foreach (var (type, method, label) in Steps)
+        var installed = new List<string>(Steps.Length);
+        foreach (var (type, method, label, optional) in Steps)
         {
             var mi = AccessTools.Method(AccessTools.TypeByName(type), method);
             if (mi == null)
             {
-                Log.Warn($"[ItsLoading] step not found, skipped: {type}.{method}");
+                if (!optional) Log.Warn($"[ItsLoading] step not found, skipped: {type}.{method}");
                 continue;
             }
             StepMap[mi] = label;
+            installed.Add(label);
             harmony.Patch(mi, prefix: new HarmonyMethod(typeof(BootPhasePatches), nameof(StepPrefix)));
         }
+        // 按实际挂上的步骤重建 Essential 刻度(版本缺步时其余重排)
+        ItsLoading.Timeline?.SetEssentialSteps(installed);
         Log.Warn($"[ItsLoading] step patches installed ({StepMap.Count}/{Steps.Length})");
 
         var essential = AccessTools.Method(
@@ -49,6 +58,26 @@ internal static class BootPhasePatches
             harmony.Patch(essential,
                 postfix: new HarmonyMethod(typeof(BootPhasePatches), nameof(AfterEssential)));
             Log.Warn("[ItsLoading] ExecuteEssential completion patch installed");
+        }
+
+        // 存档读取记时(云同步等待之后的收尾段):只进活动日志,不推进度 ——
+        // 这段在阶段 3 完成与阶段 4 开始之间,推进度反而要说谎
+        var saveManager = AccessTools.TypeByName("MegaCrit.Sts2.Core.Saves.SaveManager");
+        var progressRead = AccessTools.Method(saveManager, "InitProgressData");
+        if (progressRead != null)
+        {
+            harmony.Patch(progressRead,
+                prefix: new HarmonyMethod(typeof(BootPhasePatches), nameof(BeforeProgressRead)),
+                postfix: new HarmonyMethod(typeof(BootPhasePatches), nameof(AfterProgressRead)));
+            Log.Warn("[ItsLoading] progress save read patch installed");
+        }
+        var prefsRead = AccessTools.Method(saveManager, "InitPrefsData");
+        if (prefsRead != null)
+        {
+            harmony.Patch(prefsRead,
+                prefix: new HarmonyMethod(typeof(BootPhasePatches), nameof(BeforePrefsRead)),
+                postfix: new HarmonyMethod(typeof(BootPhasePatches), nameof(AfterPrefsRead)));
+            Log.Warn("[ItsLoading] prefs save read patch installed");
         }
 
         var menu = AccessTools.Method("MegaCrit.Sts2.Core.Nodes.NGame:LaunchMainMenu");
@@ -158,6 +187,40 @@ internal static class BootPhasePatches
     }
 
     private static void AfterEssential() => ItsLoading.Timeline.EssentialCompleted();
+
+    // ---- 存档读取(活动日志记时,模式同 mod 子步骤:prefix 报开始,postfix 报耗时) ----
+
+    private static long _progressReadTicks, _prefsReadTicks;
+
+    private static void BeforeProgressRead()
+    {
+        _progressReadTicks = ItsLoading.Sw.ElapsedTicks;
+        ItsLoading.Timeline?.Activity(I18n.T("bar.readingProgress"));
+    }
+
+    private static void AfterProgressRead()
+    {
+        long end = ItsLoading.Sw.ElapsedTicks;
+        ItsLoading.Timeline?.Activity(I18n.T("bar.readReady", new()
+        {
+            ["ms"] = $"{(long)((end - _progressReadTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency)}ms",
+        }));
+    }
+
+    private static void BeforePrefsRead()
+    {
+        _prefsReadTicks = ItsLoading.Sw.ElapsedTicks;
+        ItsLoading.Timeline?.Activity(I18n.T("bar.readingPrefs"));
+    }
+
+    private static void AfterPrefsRead()
+    {
+        long end = ItsLoading.Sw.ElapsedTicks;
+        ItsLoading.Timeline?.Activity(I18n.T("bar.prefsReady", new()
+        {
+            ["ms"] = $"{(long)((end - _prefsReadTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency)}ms",
+        }));
+    }
 
     private static void BeforeLogoPlay()
     {
