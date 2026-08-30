@@ -29,6 +29,7 @@
 
 - **经典**:底部双条 + 活动日志,低调不打扰
 - **Minespire**:整屏红底的居中布局,标签在条上方、活动日志挪到左下角,顶部是像素风游戏 logo,右下角还有一只奔跑的小狐狸——Minecraft 风格的启动画面,加载完成后轻轻淡出揭幕
+- **Slaytheshin**:整屏纯白的居中布局,两排徽记图标就是进度条——第一排标记总进度(当前阶段放大),第二排上有一条灰色遮罩随进度盖深图标;底部居中三行小字活动日志——原神风格的启动画面,加载完成后轻轻淡出揭幕
 
 ## 安装
 
@@ -79,10 +80,11 @@ This mod shows a progress bar during game startup, telling you **what is actuall
 
 ## Themes
 
-Two loading themes, selectable via a dropdown in the mod settings (applies from the next launch):
+Three loading themes, selectable via a dropdown in the mod settings (applies from the next launch):
 
 - **Classic**: the bottom dual-bar strip with the activity log
 - **Minespire**: a full-screen red centered layout — labels above each bar, the activity log moved to the bottom-left corner, a pixel-style game logo on top, and a little running fox in the bottom-right — a Minecraft-style boot screen, gently fading out when the boot completes
+- **Slaytheshin**: a full-screen white centered layout where two rows of emblem icons act as the progress bar — the top row marks the overall boot (current stage enlarged), while a gray mask sweeps over the denser second row as the in-stage progress advances; a three-line activity log sits centered at the bottom — a Genshin-Impact-style boot screen, gently fading out when the boot completes
 
 ## Install
 

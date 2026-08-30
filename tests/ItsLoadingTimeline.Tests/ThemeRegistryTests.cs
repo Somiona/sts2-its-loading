@@ -12,6 +12,8 @@ public sealed class ThemeRegistryTests
     [InlineData("{\"Theme\": \"Minespire\"}", LoadingTheme.Minespire)]
     [InlineData("{\"Theme\": \"minespire\"}", LoadingTheme.Minespire)] // 小写(手改/迁移源)
     [InlineData("{\"Theme\": \"Classic\"}", LoadingTheme.Classic)]
+    [InlineData("{\"Theme\": \"Slaytheshin\"}", LoadingTheme.Slaytheshin)]
+    [InlineData("{\"Theme\": \"slaytheshin\"}", LoadingTheme.Slaytheshin)] // 小写(手改/迁移源)
     [InlineData("{\n  \"Theme\": \"Minespire\"\n}", LoadingTheme.Minespire)] // BaseLib WriteIndented 格式
     public void ParseThemeValue_reads_valid(string json, LoadingTheme expected)
         => Assert.Equal(expected, ThemeRegistry.ParseThemeValue(json));

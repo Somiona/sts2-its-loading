@@ -41,5 +41,35 @@ owners.
 
 ---
 
+## slaytheshin_1.png … slaytheshin_14.png —— 原神风徽记图标(Slaytheshin 主题 / Slaytheshin theme emblems)
+
+- 来源 / Origin: 基于《原神》官方图标**重绘**的致敬性二创 / Fan **redrawings**
+  inspired by official *Genshin Impact* emblems
+- 版权 / Copyright: 重绘图案为本 mod 作者制作,无第三方版权主张 /
+  The redrawn artwork was made by the mod author; no third-party copyright claim
+
+本 mod 为非官方社区作品,与任何公司或实体(包括但不限于 COGNOSPHERE /
+HoYoverse、MegaCrit)均无关联;《原神》与 Slay the Spire 2 的名称、商标及
+原版素材归其各自权利人所有。
+
+This mod is an unofficial community work and is not affiliated with any company
+or entity (including but not limited to COGNOSPHERE / HoYoverse and MegaCrit);
+Genshin Impact and Slay the Spire 2 names, trademarks and original assets
+belong to their respective owners.
+
+## slaytheshin_logo.png —— 原神风游戏 logo(本 mod 自有素材 / our own asset)
+
+- 来源 / Origin: **AI 生成图像**(作者使用 AI 图像工具制作)/ **AI-generated
+  image**, created by the mod author with an AI image tool
+- 版权 / Copyright: 无第三方版权主张,作为本 mod 的一部分随 mod 分发 /
+  No third-party copyright claim; distributed as part of this mod
+
+该 logo 仅是对《原神》视觉风格的致敬性二创,不与任何公司或实体关联。
+
+The logo is a tribute to Genshin Impact's visual style only and is not
+affiliated with any company or entity.
+
+---
+
 其余代码与素材(除非另有注明)为本项目原创,随本 mod 分发。
 All other code and assets are original to this project unless noted otherwise.

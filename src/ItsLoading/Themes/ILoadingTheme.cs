@@ -71,6 +71,7 @@ public enum LoadingTheme
 {
     Classic,
     Minespire,
+    Slaytheshin,
 }
 
 /// <summary>
@@ -105,6 +106,7 @@ internal static class ThemeRegistry
     {
         [LoadingTheme.Classic] = static () => new ClassicBar(),
         [LoadingTheme.Minespire] = static () => new MinespireBar(),
+        [LoadingTheme.Slaytheshin] = static () => new SlaytheshinBar(),
     };
 
     /// <summary>当前主题(直读 cfg;缺失/非法值回默认,任何 IO 异常同)。</summary>

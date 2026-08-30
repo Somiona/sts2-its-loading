@@ -7,6 +7,9 @@ changenote 随版本号发出,上传成功后自动把该区改标为发布的�
 
 ## Unreleased
 
+- 新主题来啦!经典抽卡游戏风格的主题,在设置里选择,下次启动生效喵
+  - A new theme has arrived~ a classic gacha-game-style theme. Pick it in the settings, active from the next launch nya
+
 ## [v0.16.1] — 2026-08-30
 
 - 新主题来啦! Minespire: Minecraft 风格的整屏红底居中双条。在设置里选择,下次启动生效喵

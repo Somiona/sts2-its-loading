@@ -40,6 +40,8 @@ cp LICENSE_CLAIM.md "$STAGE/"
 # minespire 主题素材(© 狐狸 NeoForged contributors, LGPL-2.1;gd 帧 0 经 _mod_dir() 读取)
 cp src/ItsLoading/Themes/Minespire/fox_running.png "$STAGE/"
 cp src/ItsLoading/Themes/Minespire/mc_style_sts2_logo.png "$STAGE/"
+# slaytheshin 主题素材(原神风徽记 1-14 + logo;出处见 LICENSE_CLAIM.md)
+cp src/ItsLoading/Themes/Slaytheshin/slaytheshin_*.png "$STAGE/"
 # 只带各语言 strings.json(与 install.sh 一致;settings_ui.json 仅走 pck,
 # 松散放置会被游戏 mod 扫描器当 manifest 报错)
 for f in src/ItsLoading/localization/*/strings.json; do

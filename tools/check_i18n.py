@@ -32,6 +32,7 @@ REQUIRED_SETTINGS_KEYS = [
     # 下拉框枚举项(ITSLOADING-THEME.<枚举名>,缺键回退枚举原名);新增主题时同增
     "ITSLOADING-THEME.Classic",
     "ITSLOADING-THEME.Minespire",
+    "ITSLOADING-THEME.Slaytheshin",
 ]
 
 

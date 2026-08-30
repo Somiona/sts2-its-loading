@@ -135,9 +135,9 @@ internal static class BootSplash
     ///   与 C# 侧常量同源(漂移 = 自清理失灵,故必须走 token)
     ///   @@*_COLOR@@ / @@*_Y@@ / @@*_HEIGHT@@ 等 —— ClassicBar 的样式常量,
     ///   gd 正常路径与 C# 首启兜底共用同一组常量。
-    ///   @@THEME_CFG_PATH@@ / @@THEME_LEGACY_PATH@@ / @@MOD_VERSION@@ / @@MS_*@@ ——
+    ///   @@THEME_CFG_PATH@@ / @@THEME_LEGACY_PATH@@ / @@MOD_VERSION@@ / @@MS_*@@ / @@SS_*@@ ——
     ///   主题配置(BaseLib cfg 为主 + 迁移期旧 txt 回退)、版本串与
-    ///   MinespireBar 布局常量(模板按主题值分支两套布局,与 ThemeRegistry 一致)。
+    ///   MinespireBar / SlaytheshinBar 布局常量(模板按主题值分支三套布局,与 ThemeRegistry 一致)。
     /// </summary>
     private static readonly string BootSplashGd = BuildBootSplashGd();
 
@@ -198,7 +198,39 @@ internal static class BootSplash
             .Replace("@@MS_VERSION_RIGHT@@", GdFloat(MinespireBar.VersionRight))
             .Replace("@@MS_VERSION_BOTTOM@@", GdFloat(MinespireBar.VersionBottom))
             .Replace("@@MS_CYCLE_S@@", GdFloat(MinespireBar.IndeterminateCycleSeconds))
-            .Replace("@@MS_FADE_S@@", GdFloat(MinespireBar.FadeSeconds));
+            .Replace("@@MS_FADE_S@@", GdFloat(MinespireBar.FadeSeconds))
+            // Slaytheshin 主题:布局常量在 SlaytheshinBar,模板不写死(同 Minespire)
+            .Replace("@@SS_BG_COLOR@@", GdColor(SlaytheshinBar.BgColor))
+            .Replace("@@SS_TEXT_COLOR@@", GdColor(SlaytheshinBar.TextColor))
+            .Replace("@@SS_LOG_COLOR@@", GdColor(SlaytheshinBar.LogColor))
+            .Replace("@@SS_VERSION_COLOR@@", GdColor(SlaytheshinBar.VersionColor))
+            .Replace("@@SS_FILL_TINT_COLOR@@", GdColor(SlaytheshinBar.FillTint))
+            .Replace("@@SS_DOT_COLOR@@", GdColor(SlaytheshinBar.DotColor))
+            .Replace("@@SS_DOT_SCALE@@", GdFloat(SlaytheshinBar.DotScale))
+            .Replace("@@SS_PLACEHOLDER_COLOR@@", GdColor(SlaytheshinBar.PlaceholderColor))
+            .Replace("@@SS_DESIGN_W@@", GdFloat(SlaytheshinBar.DesignW))
+            .Replace("@@SS_DESIGN_H@@", GdFloat(SlaytheshinBar.DesignH))
+            .Replace("@@SS_LOGO_Y@@", GdFloat(SlaytheshinBar.LogoY))
+            .Replace("@@SS_LOGO_W@@", GdFloat(SlaytheshinBar.LogoDesignW))
+            .Replace("@@SS_FALLBACK_FONT@@", SlaytheshinBar.FallbackTitleFont.ToString())
+            .Replace("@@SS_ICONS@@", SlaytheshinBar.IconsPerRow.ToString())
+            .Replace("@@SS_ICON_SIZE@@", GdFloat(SlaytheshinBar.Row1IconSize))
+            .Replace("@@SS_ICON_GAP@@", GdFloat(SlaytheshinBar.Row1Gap))
+            .Replace("@@SS_ICON_CY@@", GdFloat(SlaytheshinBar.Row1Cy))
+            .Replace("@@SS_ENLARGE@@", GdFloat(SlaytheshinBar.Enlarge))
+            .Replace("@@SS_SUB_SCALE@@", GdFloat(SlaytheshinBar.Row2Scale))
+            .Replace("@@SS_SUB_GAP@@", GdFloat(SlaytheshinBar.Row2Gap))
+            .Replace("@@SS_SUB_CY@@", GdFloat(SlaytheshinBar.Row2Cy))
+            .Replace("@@SS_LOG_LINES@@", SlaytheshinBar.LogLines.ToString())
+            .Replace("@@SS_LOG_PER_LINE@@", SlaytheshinBar.LogPerLine.ToString())
+            .Replace("@@SS_LOG_SEP@@", SlaytheshinBar.LogSeparator)
+            .Replace("@@SS_LOG_FONT@@", SlaytheshinBar.LogFont.ToString())
+            .Replace("@@SS_LOG_LINE_H@@", GdFloat(SlaytheshinBar.LogLineH))
+            .Replace("@@SS_LOG_BOTTOM@@", GdFloat(SlaytheshinBar.LogBottom))
+            .Replace("@@SS_LOG_SIDE_PAD@@", GdFloat(SlaytheshinBar.LogSidePad))
+            .Replace("@@SS_VERSION_LEFT@@", GdFloat(SlaytheshinBar.VersionLeft))
+            .Replace("@@SS_VERSION_TOP@@", GdFloat(SlaytheshinBar.VersionTop))
+            .Replace("@@SS_VERSION_FONT@@", GdFloat(SlaytheshinBar.VersionFont));
 
     /// <summary>Color → GDScript 字面量(不变文化,防区域设置把小数点变逗号)。</summary>
     private static string GdColor(Color c) => string.Create(
@@ -209,14 +241,17 @@ internal static class BootSplash
         "0.####", System.Globalization.CultureInfo.InvariantCulture);
 
     private const string BootSplashGdTemplate = @"extends Node
-# LoadingBar boot view — injected by ItsLoading mod. BOOT_VERSION = 18
+# LoadingBar boot view — injected by ItsLoading mod. BOOT_VERSION = 23
 # 启动时主动自检:mod 在 settings 里被禁用、或本地/工坊文件均已不存在,
 # 则不显示任何进度条,并错后 2 秒做原子自清理(避开启动期 I/O;任何时刻被强退均无害)。
 # 正常路径按主题(BaseLib cfg @@THEME_CFG_PATH@@;C# ThemeRegistry 读同一文件)分支布局:
 #   classic  —— 底部条(无垫底),负责进度刻度 0 → 0.25,
 #               尾部增量跟踪 godot.log 显示工坊读取进度;
 #   minespire —— 整屏红居中布局(Minecraft 风格,含右下奔跑狐狸),
-#               同样覆盖 0 → 0.25,工坊轮询逻辑两布局共用。
+#               同样覆盖 0 → 0.25,工坊轮询逻辑各布局共用;
+#   slaytheshin —— 整屏白居中布局(原神风):两排徽记图标即进度条,第一排
+#               当前阶段放大、第二排(图标+间隙小圆)被剪贴蒙版式深色填充
+#               从左往右逐渐「灌」深,底部 3 行 × 5 条居中活动日志,进度区不写文字。
 # 桥协议(BOOT_VERSION 16 / bridge_version 2):C# 侧经 csharp_attach() 确认接管后,本节点
 # 成为唯一加载 UI——工坊轮询/旧 30s 安全网停用,节点保持可见且仅保留 5 分钟失联看门狗;
 # 全程呈现改由 C# 侧 csharp_present() 逐事件驱动(与 ClassicBar 同一数学与出帧配对)。
@@ -248,6 +283,11 @@ var boot_start_msec := 0
 var _lang := ""eng""
 var _strings := {}
 var _frozen := false
+var _frozen_msec := 0         # 冻结起点:冻结分支安全网从这点起算(_ready 累计会让慢扫描后的合法冻结被秒杀)
+var _last_activity_msec := 0  # 最近一次观测到 godot.log 增长的时刻:接管前安全网按「静默」计时,
+                              # 而非从 _ready 绝对计时——冷缓存/Steam 元数据慢的工坊扫描可远超 30s
+                              # (2026-08-30 实机:扫描 59s,绝对计时网在扫描中途退休了 splash,
+                              #  之后 C# 全程 present 被丢弃 → 加载期黑屏)
 # ---- 工坊扫描时序(瀑布图的「游戏预加载」块逐项拆解) ----
 var _ws_order: Array = []   # [[工坊项id, 首见引擎毫秒], ...](日志到达序)
 var _ws_names := {}         # 工坊项id → mod 显示名(清单文件基名)
@@ -278,9 +318,33 @@ var _log_labels: Array = []
 var _last_log := """"
 # ---- 主题(BaseLib cfg @@THEME_CFG_PATH@@;C# ThemeRegistry 读同一文件) ----
 var _theme := ""classic""
-var _ms_root: Control          # minespire 全屏根:揭幕淡出对它做 modulate(CanvasLayer 无此属性)
-var _fill_base_x := 0.0        # 阶段条填充 x 基线(classic 0;minespire 内缩;滑块滑过后复位)
+var _fade_root: Control        # 主题全屏根(minespire/slaytheshin):揭幕淡出对它做 modulate(CanvasLayer 无此属性)
+var _fill_base_x := 0.0        # 阶段条填充 x 基线(classic 0;minespire 内缩;slaytheshin 第二排左缘;滑块滑过后复位)
 var _fox_atlas: AtlasTexture   # 奔跑狐狸逐帧 region(素材缺席则保持 null,全流程跳过)
+# ---- slaytheshin 主题状态(白底双排徽记 + 灰遮罩) ----
+const SS_LOG_SEP := ""@@SS_LOG_SEP@@""  # 分隔符走 token;必须 const 包裹(裸 token 会被门禁哑替换成 1.0)
+# 第二排剪贴蒙版暗层 shader(C# SlaytheshinBar.FillShaderCode 同款):贴图按 tint 暗调,
+# 仅轨分数段 [seg_a, seg_b] 内可见;nf_* 构建期烘焙本节点在轨上的分数几何。进度更新只写
+# seg_a/seg_b(全节点同值)——set_shader_parameter 走 RenderingServer,不触 Control 矩形,
+# 同步突发冻结期照常生效(与第一排放大标记的变换路径同款约束)。
+# 三引号用单引号:双引号在宿主 verbatim 字符串里会被成对转义吞噬。
+const SS_FILL_GLSL := '''shader_type canvas_item;
+uniform float seg_a = 0.0;
+uniform float seg_b = 0.0;
+uniform float nf_left = 0.0;
+uniform float nf_width = 1.0;
+uniform vec4 tint : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+
+void fragment() {
+	vec4 c = texture(TEXTURE, UV);
+	float x = nf_left + UV.x * nf_width;
+	float vis = step(seg_a, x) * step(x, seg_b) * step(0.0001, seg_b - seg_a);
+	COLOR = vec4(c.rgb * tint.rgb, c.a * tint.a * vis);
+}'''
+var _ss_row1: Array = []       # 第一排 7 控件(TextureRect / 缺图占位 ColorRect)
+var _ss_row1_rect: Array = []  # 第一排普通尺寸 Rect2(屏幕绝对坐标;放大不改矩形,见 _ss_set_stage)
+var _ss_fill_mats: Array = []  # 第二排暗色孪生材质(seg_a/seg_b 段驱动,见 _ss_sync_fill)
+var _ss_fill_shader: Shader
 
 func _read_theme() -> void:
 	# 读链:cfg 的 Theme 键(枚举名,to_lower 统一)→ 旧 txt(迁移完成前的过渡启动,
@@ -300,6 +364,7 @@ func _read_theme() -> void:
 
 func _ready() -> void:
 	boot_start_msec = Time.get_ticks_msec()
+	_last_activity_msec = boot_start_msec
 	_detect_language()
 	_read_theme()
 	if _detect_state() != ""ok"":
@@ -495,6 +560,8 @@ func _build_ui() -> void:
 	add_child(_layer)
 	if _theme == ""minespire"":
 		_build_ui_minespire(vs)
+	elif _theme == ""slaytheshin"":
+		_build_ui_slaytheshin(vs)
 	else:
 		_build_ui_classic(vs)
 
@@ -545,15 +612,15 @@ func _build_ui_minespire(vs: Vector2) -> void:
 	_fill_base_x = @@MS_FILL_INSET@@ * s
 
 	# 全屏根 + 红底:整屏覆盖期菜单仍可交互(全家 IGNORE,纯视觉覆盖)
-	_ms_root = Control.new()
-	_ms_root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_ms_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_layer.add_child(_ms_root)
+	_fade_root = Control.new()
+	_fade_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_fade_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_layer.add_child(_fade_root)
 	var bg := ColorRect.new()
 	bg.color = @@MS_BG_COLOR@@
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_ms_root.add_child(bg)
+	_fade_root.add_child(bg)
 
 	_ms_add_logo(s, ox, oy)
 
@@ -566,7 +633,7 @@ func _build_ui_minespire(vs: Vector2) -> void:
 	_step.add_theme_color_override(""font_color"", @@MS_TEXT_COLOR@@)
 	_step.text = _txt(""bar.starting"")
 	_step.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_ms_root.add_child(_step)
+	_fade_root.add_child(_step)
 	y += (@@MS_STEP_LABEL_H@@ + @@MS_LABEL_GAP@@) * s
 	_overall_fill = _ms_add_bar(Vector2(bar_x, y), s)
 	_overall_fill.color = Color(1, 1, 1, 0.75)
@@ -577,7 +644,7 @@ func _build_ui_minespire(vs: Vector2) -> void:
 	_detail.add_theme_color_override(""font_color"", @@MS_DIM_COLOR@@)
 	_detail.text = ""engine boot""
 	_detail.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_ms_root.add_child(_detail)
+	_fade_root.add_child(_detail)
 	y += (@@MS_DETAIL_LABEL_H@@ + @@MS_LABEL_GAP@@) * s
 	_local_fill = _ms_add_bar(Vector2(bar_x, y), s)
 	# 填充契约同 classic:fill 宽 = _track_w × 分数;minespire 的 _track_w 是内缩后的净宽
@@ -592,14 +659,14 @@ func _build_ui_minespire(vs: Vector2) -> void:
 		l.add_theme_color_override(""font_color"",
 			Color(1, 1, 1, 0.3 + 0.65 * float(i + 1) / ACTIVITY_LINES))
 		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_ms_root.add_child(l)
+		_fade_root.add_child(l)
 		_log_labels.append(l)
 
 	_ms_add_fox(s, ox, oy)
 	_ms_add_version(s, ox, oy)
 
 # 主题素材统一加载(mod 目录;缺席/损坏返回 null,调用方各自优雅降级)
-func _ms_load_texture(path: String) -> ImageTexture:
+func _load_texture(path: String) -> ImageTexture:
 	if not FileAccess.file_exists(path):
 		return null
 	var img := Image.new()
@@ -613,7 +680,7 @@ func _ms_add_logo(s: float, ox: float, oy: float) -> void:
 	var tex: ImageTexture = null
 	var mod_dir := _mod_dir()
 	if mod_dir != """":
-		tex = _ms_load_texture(mod_dir.path_join(""mc_style_sts2_logo.png""))
+		tex = _load_texture(mod_dir.path_join(""mc_style_sts2_logo.png""))
 	if tex == null:
 		var title := Label.new()
 		title.text = ""SLAY THE SPIRE 2""
@@ -623,7 +690,7 @@ func _ms_add_logo(s: float, ox: float, oy: float) -> void:
 		title.add_theme_font_size_override(""font_size"", int(round(@@MS_FALLBACK_FONT@@ * s)))
 		title.add_theme_color_override(""font_color"", @@MS_TEXT_COLOR@@)
 		title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_ms_root.add_child(title)
+		_fade_root.add_child(title)
 		return
 	var w: float = @@MS_LOGO_W@@ * s
 	var h: float = w * tex.get_height() / max(1.0, float(tex.get_width()))
@@ -638,7 +705,7 @@ func _ms_add_logo(s: float, ox: float, oy: float) -> void:
 	logo.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	logo.size = Vector2(w, h)
-	_ms_root.add_child(logo)
+	_fade_root.add_child(logo)
 
 func _ms_add_bar(pos: Vector2, s: float) -> ColorRect:
 	# 2px 白描边空心 + 内缩 4px 白填充:Minecraft 风格 nine-slice 条的逐像素复刻
@@ -652,7 +719,7 @@ func _ms_add_bar(pos: Vector2, s: float) -> ColorRect:
 	outline.size = Vector2(@@MS_BAR_W@@ * s, @@MS_BAR_H@@ * s)
 	outline.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	outline.add_theme_stylebox_override(""panel"", sb)
-	_ms_root.add_child(outline)
+	_fade_root.add_child(outline)
 	var fill := ColorRect.new()
 	fill.position = Vector2(@@MS_FILL_INSET@@ * s, @@MS_FILL_INSET@@ * s)
 	fill.size = Vector2(0, (@@MS_BAR_H@@ - 2.0 * @@MS_FILL_INSET@@) * s)
@@ -667,7 +734,7 @@ func _ms_add_fox(s: float, ox: float, oy: float) -> void:
 	var mod_dir := _mod_dir()
 	if mod_dir == """":
 		return
-	var sheet := _ms_load_texture(mod_dir.path_join(""fox_running.png""))
+	var sheet := _load_texture(mod_dir.path_join(""fox_running.png""))
 	if sheet == null:
 		return
 	_fox_atlas = AtlasTexture.new()
@@ -682,7 +749,7 @@ func _ms_add_fox(s: float, ox: float, oy: float) -> void:
 	fox.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	fox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	fox.size = Vector2(@@MS_FOX_W@@ * s, @@MS_FOX_H@@ * s)
-	_ms_root.add_child(fox)
+	_fade_root.add_child(fox)
 
 func _ms_add_version(s: float, ox: float, oy: float) -> void:
 	var ver := Label.new()
@@ -694,12 +761,273 @@ func _ms_add_version(s: float, ox: float, oy: float) -> void:
 	ver.add_theme_font_size_override(""font_size"", int(round(12.0 * s)))
 	ver.add_theme_color_override(""font_color"", @@MS_DIM_COLOR@@)
 	ver.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_ms_root.add_child(ver)
+	_fade_root.add_child(ver)
 
-func _ms_slide_local() -> void:
-	# Minecraft 风格不定进度语义:1/4 宽滑块左→右滚动一周(非回弹),驱动在 _process
+func _slide_local() -> void:
+	# 不定进度语义(minespire/slaytheshin 共用):1/4 宽滑块左→右滚动一周(非回弹),
+	# 驱动在 _process。slaytheshin 里 _local_fill 是游离哑对象——真正的可视是
+	# _ss_sync_fill() 的滑段(同一公式、同一蒙版形状)。
 	_local_fill.size.x = _track_w * 0.25
 	_local_fill.position.x = _fill_base_x + fposmod(_t / @@MS_CYCLE_S@@, 1.0) * _track_w * 0.75
+	_ss_sync_fill()  # slaytheshin:滑段参数化到孪生材质(其余主题空表 no-op)
+
+# ---------------- Slaytheshin 主题布局(整屏白,854×480 设计矩形等比缩放居中) ----------------
+# 原神风:两排徽记图标就是进度条。同名引用契约的关键映射——
+#   _local_fill = 游离哑 ColorRect(不入树)、_track_w = 第二排总跨度、
+#   _fill_base_x = 第二排左缘 x,于是 _set_progress / csharp_present / _process 平滑与
+#   不定分支零改动照常写宽度;第二排真正的可视由 _ss_fill_mats 的段参数承担
+#   (_ss_sync_fill 在各写入点后同步)。_step/_detail/_overall_fill 同为游离哑对象
+#   ——只喂共享逻辑的 null 守卫与文本/宽度写入。第一排(总进度)当前阶段
+#   @@SS_ENLARGE@@× 放大(_ss_set_stage,换阶段才动;pivot=底边中点 + scale,只写变换、
+#   永不改矩形——底边与整排对齐、原地放大);第二排(当前进度)85% 尺寸更密,
+#   图标+间隙小圆被剪贴蒙版式深色填充从左往右逐渐「灌」深。进度区不写文字。
+
+func _build_ui_slaytheshin(vs: Vector2) -> void:
+	var s: float = min(vs.x / @@SS_DESIGN_W@@, vs.y / @@SS_DESIGN_H@@)
+	var ox: float = (vs.x - @@SS_DESIGN_W@@ * s) * 0.5
+	var oy: float = (vs.y - @@SS_DESIGN_H@@ * s) * 0.5
+
+	_fade_root = Control.new()
+	_fade_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_fade_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_layer.add_child(_fade_root)
+	var bg := ColorRect.new()
+	bg.color = @@SS_BG_COLOR@@
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fade_root.add_child(bg)
+
+	_ss_add_logo(s, ox, oy)
+
+	# 第二排(当前进度):小而密;基圆与暗色孪生层随后叠上,行1 最后(孪生只属于第二排)
+	var s2: float = @@SS_ICON_SIZE@@ * @@SS_SUB_SCALE@@
+	var span2: float = @@SS_ICONS@@ * s2 + (@@SS_ICONS@@ - 1.0) * @@SS_SUB_GAP@@
+	var x2: float = (@@SS_DESIGN_W@@ - span2) * 0.5
+	# 剪贴蒙版 = 图标+小圆是蒙版形状,深色内容(基图 × @@SS_FILL_TINT_COLOR@@,徽记 50% 灰 →
+	# 75% 深灰)只在轨分数段 [seg_a, seg_b] 内可见,段随 local 从左往右长 → 图标与小圆
+	# 被逐渐「灌」深。几何全用轨分数(shader 内映射),进度只走 set_shader_parameter
+	# (见 _ss_sync_fill)——不触 Control 矩形,同步突发冻结期照常生效。
+	_ss_fill_shader = Shader.new()
+	_ss_fill_shader.code = SS_FILL_GLSL
+	var circle: ImageTexture = _ss_circle_tex()
+	var white: ImageTexture = _ss_white_tex()
+	var dot: float = s2 * @@SS_DOT_SCALE@@
+	for j in range(@@SS_ICONS@@ - 1):
+		var dcx: float = x2 + (float(j) + 1.0) * s2 + float(j) * @@SS_SUB_GAP@@ + @@SS_SUB_GAP@@ * 0.5
+		var drect := _ss_center_rect(ox, oy, s, dcx, @@SS_SUB_CY@@, dot)
+		var base_dot := TextureRect.new()
+		base_dot.expand_mode = TextureRect.EXPAND_IGNORE_SIZE  # 钳制陷阱:须在 texture 之前
+		base_dot.texture = circle
+		base_dot.stretch_mode = TextureRect.STRETCH_SCALE
+		base_dot.modulate = @@SS_DOT_COLOR@@  # 常驻浅灰小圆(50%,与徽记同灰阶)
+		base_dot.position = drect.position
+		base_dot.size = drect.size
+		base_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_fade_root.add_child(base_dot)
+		_ss_add_fill(circle, drect, (dcx - dot * 0.5 - x2) / span2, dot / span2,
+				@@SS_DOT_COLOR@@ * @@SS_FILL_TINT_COLOR@@)
+	for i in range(@@SS_ICONS@@):
+		var irect := _ss_center_rect(ox, oy, s, x2 + i * (s2 + @@SS_SUB_GAP@@) + s2 * 0.5, @@SS_SUB_CY@@, s2)
+		_ss_add_icon(_ss_icon_path(@@SS_ICONS@@ + i + 1), irect)
+		# 孪生基色 = 白(缺图白方块占位)或徽记纹理自身灰阶,×@@SS_FILL_TINT_COLOR@@ 后同为 75% 深灰档
+		var itex := _ss_tex_or_null(_ss_icon_path(@@SS_ICONS@@ + i + 1))
+		_ss_add_fill(itex if itex != null else white, irect,
+				float(i) * (s2 + @@SS_SUB_GAP@@) / span2, s2 / span2, @@SS_FILL_TINT_COLOR@@)
+	# 哑引用:共享写入点(csharp_present/_set_progress/_process/_slide_local)仍写
+	# _local_fill 的 size/position——游离对象无渲染副作用(同 _overall_fill 契约);
+	# 第二排可视改由 _ss_fill_mats 段参数承担,_fill_base_x/_track_w 仅供这些写入。
+	_local_fill = ColorRect.new()
+	_fill_base_x = ox + x2 * s
+	_track_w = span2 * s
+
+	# 第一排(总进度):normal 矩形表一次预计算,矩形终身不变——放大是 pivot+scale
+	# (见 _ss_set_stage),底边中点为不动点,底边与整排对齐、原地向上/两侧长大。
+	var row_bottom: float = @@SS_ICON_CY@@ + @@SS_ICON_SIZE@@ * 0.5
+	var span1: float = @@SS_ICONS@@ * @@SS_ICON_SIZE@@ + (@@SS_ICONS@@ - 1.0) * @@SS_ICON_GAP@@
+	var x1: float = (@@SS_DESIGN_W@@ - span1) * 0.5
+	for i in range(@@SS_ICONS@@):
+		var cx: float = x1 + i * (@@SS_ICON_SIZE@@ + @@SS_ICON_GAP@@) + @@SS_ICON_SIZE@@ * 0.5
+		_ss_row1_rect.append(_ss_bottom_rect(ox, oy, s, cx, row_bottom, @@SS_ICON_SIZE@@))
+		_ss_row1.append(_ss_add_icon(_ss_icon_path(i + 1), _ss_row1_rect[i]))
+	_ss_set_stage(1)  # 工坊期(阶段 1)起即有放大标记
+
+	# 底部居中 3 行 × 每行 5 条活动日志(整行淘汰,渲染在 _ss_log_render)
+	for i in range(@@SS_LOG_LINES@@):
+		var l := Label.new()
+		l.position = Vector2(ox + @@SS_LOG_SIDE_PAD@@ * s,
+				oy + (@@SS_DESIGN_H@@ - @@SS_LOG_BOTTOM@@ - float(@@SS_LOG_LINES@@ - i) * @@SS_LOG_LINE_H@@) * s)
+		l.size = Vector2((@@SS_DESIGN_W@@ - 2.0 * @@SS_LOG_SIDE_PAD@@) * s, @@SS_LOG_LINE_H@@ * s)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		l.add_theme_font_size_override(""font_size"", int(round(@@SS_LOG_FONT@@ * s)))
+		l.add_theme_color_override(""font_color"", @@SS_LOG_COLOR@@)
+		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_fade_root.add_child(l)
+		_log_labels.append(l)
+
+	_ss_add_version(s, ox, oy)
+
+	# 哑引用:共享逻辑(csharp_present 空判 / _set_progress 文本与宽度写入)需要它们非空。
+	# 不入树的游离对象,写入无渲染副作用;会话级 3 个小对象,不释放。
+	_step = Label.new()
+	_detail = Label.new()
+	_overall_fill = ColorRect.new()
+
+func _ss_icon_path(index: int) -> String:
+	return ""slaytheshin_%d.png"" % index
+
+func _ss_center_rect(ox: float, oy: float, s: float, cx: float, cy: float, size: float) -> Rect2:
+	return Rect2(ox + (cx - size * 0.5) * s, oy + (cy - size * 0.5) * s, size * s, size * s)
+
+# 底边中点锚:放大时底边不动、原地向上/两侧长大(与 C# BottomCenterRect 同款)
+func _ss_bottom_rect(ox: float, oy: float, s: float, cx: float, bottom: float, size: float) -> Rect2:
+	return Rect2(ox + (cx - size * 0.5) * s, oy + (bottom - size) * s, size * s, size * s)
+
+# 主题贴图解析:dll 同目录(与 C# LoadThemeTexture 同一处);缺席返回 null
+func _ss_tex_or_null(path: String) -> ImageTexture:
+	var mod_dir := _mod_dir()
+	if mod_dir != """":
+		return _load_texture(mod_dir.path_join(path))
+	return null
+
+# 单槽位:贴图缺席 → 灰方块占位(布局数学不变,主题不因缺图失败)
+func _ss_add_icon(path: String, rect: Rect2) -> Control:
+	var tex := _ss_tex_or_null(path)
+	var c: Control
+	if tex != null:
+		var t := TextureRect.new()
+		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE  # 钳制陷阱:须在 texture 之前
+		t.texture = tex
+		t.stretch_mode = TextureRect.STRETCH_SCALE
+		c = t
+	else:
+		var ph := ColorRect.new()
+		ph.color = @@SS_PLACEHOLDER_COLOR@@
+		c = ph
+	c.position = rect.position
+	c.size = rect.size
+	c.pivot_offset = Vector2(rect.size.x * 0.5, rect.size.y)  # 底边中点 = scale 的不动点
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fade_root.add_child(c)
+	return c
+
+# 暗色孪生节点:与基图同 rect,shader 按 tint 暗调、仅轨分数段 [seg_a, seg_b] 内可见
+# (PS 剪贴蒙版的深色内容)。构建期写死矩形与几何(nf_*);进度只走 set_shader_parameter
+# (_ss_sync_fill),不触 Control 矩形。
+func _ss_add_fill(tex: Texture2D, rect: Rect2, nf_left: float, nf_width: float, tint: Color) -> void:
+	var t := TextureRect.new()
+	t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE  # 钳制陷阱:须在 texture 之前
+	t.texture = tex
+	t.stretch_mode = TextureRect.STRETCH_SCALE
+	t.position = rect.position
+	t.size = rect.size
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var mat := ShaderMaterial.new()
+	mat.shader = _ss_fill_shader
+	mat.set_shader_parameter(""tint"", tint)
+	mat.set_shader_parameter(""nf_left"", nf_left)
+	mat.set_shader_parameter(""nf_width"", nf_width)
+	mat.set_shader_parameter(""seg_a"", 0.0)
+	mat.set_shader_parameter(""seg_b"", -1.0)  # 空段:首帧填充前不可见
+	t.material = mat
+	_fade_root.add_child(t)
+	_ss_fill_mats.append(mat)
+
+# 第二排填充段(与 C# SlaytheshinFill.Segment 同公式):确定进度 = [0, _local_display];
+# 不定进度 = 1/4 宽滑段,头部 fposmod(_t / @@MS_CYCLE_S@@) × 0.75(与 _slide_local 同式)。
+# 段参数全体节点同值;其余主题(空表)no-op。
+func _ss_sync_fill() -> void:
+	if _ss_fill_mats.is_empty():
+		return
+	var a: float
+	var b: float
+	if _local_indeterminate:
+		a = fposmod(_t / @@MS_CYCLE_S@@, 1.0) * 0.75
+		b = a + 0.25
+	else:
+		a = 0.0
+		b = clampf(_local_display, 0.0, 1.0)
+	for m in _ss_fill_mats:
+		m.set_shader_parameter(""seg_a"", a)
+		m.set_shader_parameter(""seg_b"", b)
+
+# 生成的小圆纹理(纯白,alpha 边缘 1px 抗锯齿;着色走 modulate / 孪生 tint)
+func _ss_circle_tex() -> ImageTexture:
+	var size := 32
+	var r := float(size) * 0.45  # 有效半径 45%:留 1px 淡出带
+	var c := (float(size) - 1.0) * 0.5
+	var img := Image.create_empty(size, size, false, Image.FORMAT_RGBA8)
+	for y in size:
+		for x in size:
+			var d: float = Vector2(float(x) - c, float(y) - c).length()
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, clampf(r - d + 0.5, 0.0, 1.0)))
+	return ImageTexture.create_from_image(img)
+
+# 缺图占位槽的孪生用纯白小方块(着色 = @@SS_PLACEHOLDER_COLOR@@ × tint,与基占位同构)
+func _ss_white_tex() -> ImageTexture:
+	var img := Image.create_empty(4, 4, false, Image.FORMAT_RGBA8)
+	img.fill(Color.WHITE)
+	return ImageTexture.create_from_image(img)
+
+# 第一排放大标记:当前阶段 scale=@@SS_ENLARGE@@、其余 1.0。矩形终身不变(见上方 _ss_row1 注释)。
+# 只写变换路径(position 同款,实测突发冻结期照常生效),永不触发「改尺寸→等重绘」。
+func _ss_set_stage(stage: int) -> void:
+	if _ss_row1.is_empty():
+		return
+	var idx: int = clamp(stage, 1, @@SS_ICONS@@) - 1
+	for i in range(_ss_row1.size()):
+		_ss_row1[i].scale = Vector2(@@SS_ENLARGE@@, @@SS_ENLARGE@@) if i == idx else Vector2.ONE
+
+# 3×5 整行淘汰窗口(C# SlaytheshinLog 同款算法):扁平整列表超限 slice 整行,分块渲染
+func _ss_log_render() -> void:
+	var cap := @@SS_LOG_LINES@@ * @@SS_LOG_PER_LINE@@
+	while _log_lines.size() > cap:
+		_log_lines = _log_lines.slice(@@SS_LOG_PER_LINE@@)
+	for i in _log_labels.size():
+		var start := i * @@SS_LOG_PER_LINE@@
+		if start >= _log_lines.size():
+			_log_labels[i].text = """"
+			continue
+		var chunk := _log_lines.slice(start, start + @@SS_LOG_PER_LINE@@)
+		_log_labels[i].text = SS_LOG_SEP.join(PackedStringArray(chunk))
+
+func _ss_add_logo(s: float, ox: float, oy: float) -> void:
+	# 同 minespire 槽位(设计宽 @@SS_LOGO_W@@、高按图比例,水平居中);缺席回退同位文字标题
+	var tex: ImageTexture = null
+	var mod_dir := _mod_dir()
+	if mod_dir != """":
+		tex = _load_texture(mod_dir.path_join(""slaytheshin_logo.png""))
+	if tex == null:
+		var title := Label.new()
+		title.text = ""SLAY THE SPIRE 2""
+		title.position = Vector2(ox, oy + @@SS_LOGO_Y@@ * s)
+		title.size = Vector2(@@SS_DESIGN_W@@ * s, (@@SS_FALLBACK_FONT@@ + 6.0) * s)
+		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		title.add_theme_font_size_override(""font_size"", int(round(@@SS_FALLBACK_FONT@@ * s)))
+		title.add_theme_color_override(""font_color"", @@SS_TEXT_COLOR@@)
+		title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_fade_root.add_child(title)
+		return
+	var w: float = @@SS_LOGO_W@@ * s
+	var h: float = w * tex.get_height() / max(1.0, float(tex.get_width()))
+	var logo := TextureRect.new()
+	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE  # 钳制陷阱:须在 texture 之前
+	logo.texture = tex
+	logo.position = Vector2(ox + (@@SS_DESIGN_W@@ * s - w) * 0.5, oy + @@SS_LOGO_Y@@ * s)
+	logo.stretch_mode = TextureRect.STRETCH_SCALE
+	logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	logo.size = Vector2(w, h)
+	_fade_root.add_child(logo)
+
+func _ss_add_version(s: float, ox: float, oy: float) -> void:
+	# 左上角小字:比日志字稍小,15% 灰(默认左对齐,无需 size)
+	var ver := Label.new()
+	ver.text = ""It's Loading v@@MOD_VERSION@@""
+	ver.position = Vector2(ox + @@SS_VERSION_LEFT@@ * s, oy + @@SS_VERSION_TOP@@ * s)
+	ver.add_theme_font_size_override(""font_size"", int(round(@@SS_VERSION_FONT@@ * s)))
+	ver.add_theme_color_override(""font_color"", @@SS_VERSION_COLOR@@)
+	ver.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fade_root.add_child(ver)
 
 func _add_bar(strip: Control, y: float, height: float, fill_color: Color) -> ColorRect:
 	var track := ColorRect.new()
@@ -735,8 +1063,8 @@ func _process(delta: float) -> void:
 		# C# 正常驱动两条;无可测局部总量时只在自然帧上跑轻量动画。
 		_t += delta
 		if _local_indeterminate:
-			if _theme == ""minespire"":
-				_ms_slide_local()
+			if _theme == ""minespire"" or _theme == ""slaytheshin"":
+				_slide_local()
 			else:
 				var w: float = @@PULSE_MIN@@ + abs(fmod(_t * 0.8, 2.0) - 1.0) * @@PULSE_TRAVEL@@
 				_local_fill.size.x = min(w, _track_w)
@@ -746,6 +1074,7 @@ func _process(delta: float) -> void:
 			_overall_fill.size.x = _track_w * _overall_display
 			_local_fill.size.x = _track_w * _local_display
 			_local_fill.position.x = _fill_base_x
+			_ss_sync_fill()  # slaytheshin:平滑后的段参数(其余主题空表 no-op)
 		if Time.get_ticks_msec() - _bridge_last_present_msec > BRIDGE_WATCHDOG_MSEC:
 			print(""[LoadingBarBoot] bridge watchdog expired — dismissing stale boot view"")
 			takeover()
@@ -753,8 +1082,9 @@ func _process(delta: float) -> void:
 	if _frozen:
 		# 同步突发已开始(首个 mod dll 加载,帧停止流动):冻结一切 UI 变更。
 		# 阻塞瞬间若存在未提交的文字变更(字形重排异步),已呈现帧会被渲染端
-		# 失效 → prelude 与 C# 条之间黑屏(实测间歇复现)。30s 安全网仍生效。
-		if _elapsed > 30.0:
+		# 失效 → prelude 与 C# 条之间黑屏(实测间歇复现)。60s 安全网仍生效,
+		# 但从冻结起点起算——前置阶段(工坊扫描)合法地可超 30s,_ready 累计会误杀。
+		if _frozen_msec > 0 and Time.get_ticks_msec() - _frozen_msec > 60000:
 			takeover()
 		return
 	_t += delta
@@ -763,12 +1093,15 @@ func _process(delta: float) -> void:
 		_poll_acc = 0.0
 		_poll_log()
 	if _steam_total <= 0:
-		if _theme == ""minespire"":
-			_ms_slide_local()
+		if _theme == ""minespire"" or _theme == ""slaytheshin"":
+			_slide_local()
 		else:
 			var w: float = @@PULSE_MIN@@ + abs(fmod(_t * 0.8, 2.0) - 1.0) * @@PULSE_TRAVEL@@
 			_local_fill.size.x = min(w, _track_w)
-	if _elapsed > 30.0:
+	# 接管前安全网:60s「日志静默」才退休(C# 死了/游戏卡死),扫描慢不算——
+	# 日志还在增长就说明启动在进行(_poll_log 刷新 _last_activity_msec)。
+	if Time.get_ticks_msec() - _last_activity_msec > 60000:
+		print(""[LoadingBarBoot] pre-bridge net: 60s log silence — dismissing"")
 		takeover()
 
 func _set_progress(n: int, total: int, detail: String) -> void:
@@ -781,6 +1114,7 @@ func _set_progress(n: int, total: int, detail: String) -> void:
 		_overall_fill.size.x = _track_w * _overall_display
 		_local_fill.size.x = _track_w * _local_display
 		_local_fill.position.x = _fill_base_x
+		_ss_sync_fill()  # slaytheshin:工坊期段的即时提交(其余主题空表 no-op)
 		var name := _txt(""bar.workshop"").replace(""{n}"", str(n)).replace(""{t}"", str(total))
 		_step.text = _stage_text(1, name)
 		_detail.text = detail
@@ -799,6 +1133,7 @@ func _poll_log() -> void:
 		_seen_ids.clear()
 	if size <= _log_pos:
 		return
+	_last_activity_msec = Time.get_ticks_msec()  # 日志仍在增长 = 启动还活着,安全网不响
 	f.seek(_log_pos)
 	# get_as_text() 无视 seek、永远从头读全文件(实测),必须 get_buffer 增量
 	var chunk := f.get_buffer(size - _log_pos).get_string_from_utf8()
@@ -848,6 +1183,8 @@ func _handle_line(line: String) -> void:
 		# 标志在「本会改文字的同一迭代」内生效,竞态窗口被精确关闭。
 		if _ws_end_msec == 0:
 			_ws_end_msec = Time.get_ticks_msec()
+		if not _frozen:
+			_frozen_msec = Time.get_ticks_msec()
 		_frozen = true
 
 func _extract_item_id(line: String) -> String:
@@ -885,6 +1222,9 @@ func _log_line(text: String) -> void:
 		return
 	_last_log = text
 	_log_lines.append(text)
+	if _theme == ""slaytheshin"":
+		_ss_log_render()  # 3×5 整行淘汰窗口,绕开 classic/minespire 的 ACTIVITY_LINES 渲染
+		return
 	if _log_lines.size() > ACTIVITY_LINES:
 		_log_lines = _log_lines.slice(_log_lines.size() - ACTIVITY_LINES)
 	var off := _log_lines.size() - _log_labels.size()
@@ -928,7 +1268,7 @@ func csharp_present(overall: float, local: float, stage: int,
 	if _local_indeterminate:
 		_overall_display = _overall_target
 		_overall_fill.size.x = _track_w * _overall_display
-		if _theme == ""minespire"":
+		if _theme == ""minespire"" or _theme == ""slaytheshin"":
 			_local_fill.size.x = _track_w * 0.25
 		else:
 			_local_fill.size.x = min(@@PULSE_MIN@@, _track_w)
@@ -938,10 +1278,13 @@ func csharp_present(overall: float, local: float, stage: int,
 		_local_display = _local_target
 		_local_fill.size.x = _track_w * _local_display
 		_local_fill.position.x = _fill_base_x
+	_ss_sync_fill()  # slaytheshin:确定段/不定滑段经孪生材质可视(其余主题空表 no-op)
 	_step.text = _stage_text(stage, step)
 	_detail.text = detail
 	# 活动日志:阶段切换记里程碑;否则记 detail——mod 的 prefix/postfix 各一行
 	# (加载中 / 「id · +耗时」),资产为「n/N · 文件」,计时的裸「+ms」带上步骤名。
+	if stage_changed and _theme == ""slaytheshin"":
+		_ss_set_stage(stage)  # 第一排放大标记只在换阶段时重排
 	if stage_changed:
 		_log_line(step)
 	elif detail != """":
@@ -955,16 +1298,16 @@ func takeover() -> void:
 	# 真正帧死的只有「冻结早退分支的 30s 安全网」(_frozen 且未接管)这一个调用点,
 	# 那里 tween 永不推进,必须立即隐藏;其余路径(看门狗/菜单就绪)帧都在流动。
 	var frames_alive := not _frozen or _bridge_attached
-	if _ms_root != null and frames_alive:
-		# minespire 揭幕淡出;classic(_ms_root 为 null)保持立即隐藏不变
+	if _fade_root != null and frames_alive:
+		# minespire 揭幕淡出;classic(_fade_root 为 null)保持立即隐藏不变
 		var tw := create_tween()
-		tw.tween_property(_ms_root, ""modulate:a"", 0.0, @@MS_FADE_S@@)
-		tw.finished.connect(_ms_hide)
+		tw.tween_property(_fade_root, ""modulate:a"", 0.0, @@MS_FADE_S@@)
+		tw.finished.connect(_fade_finish)
 	elif _layer:
 		_layer.visible = false
 	print(""[LoadingBarBoot] splash dismissed at frame "", Engine.get_frames_drawn())
 
-func _ms_hide() -> void:
+func _fade_finish() -> void:
 	if _layer:
 		_layer.visible = false
 ";

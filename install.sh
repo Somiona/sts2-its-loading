@@ -25,6 +25,8 @@ cp LICENSE_CLAIM.md "$GAME_MODS/"
 #   fox_running.png —— 奔跑狐狸(NeoForged/FancyModLoader,LGPL-2.1)
 cp src/ItsLoading/Themes/Minespire/fox_running.png "$GAME_MODS/"
 cp src/ItsLoading/Themes/Minespire/mc_style_sts2_logo.png "$GAME_MODS/"
+# slaytheshin 主题素材(原神风徽记 1-14 + logo;出处见 LICENSE_CLAIM.md)
+cp src/ItsLoading/Themes/Slaytheshin/slaytheshin_*.png "$GAME_MODS/"
 # 只松散复制各语言的 strings.json(gd/C# 运行时读磁盘);settings_ui.json 仅走 pck,
 # 松散放置会被游戏 mod 扫描器当 manifest 报错(2026-08-28 实测)。语言列表自动化。
 mkdir -p "$GAME_MODS/localization"
