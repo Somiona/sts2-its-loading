@@ -10,10 +10,8 @@ agents/
 
 # 构建产物
 src/*/refs/
-src/*/bin/
-src/*/obj/
-tests/*/bin/
-tests/*/obj/
+[Bb]in/
+[Oo]bj/
 
 # 工坊发布暂存
 dist/

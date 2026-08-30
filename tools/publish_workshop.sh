@@ -2,8 +2,8 @@
 # 上传/更新 Steam 创意工坊物品(Slay the Spire 2, appid 2868840)
 #
 # 用法:
-#   ./tools/publish_workshop.sh <Steam账号名>          # 构建 + 上传(密码/Steam Guard 交互输入)
-#   ./tools/publish_workshop.sh <Steam账号名> --stage-only  # 只构建+暂存,不上传(检查内容用)
+#   ./tools/publish_workshop.sh <Steam 账号名>          # 构建 + 上传(密码/Steam Guard 交互输入)
+#   ./tools/publish_workshop.sh <Steam 账号名> --stage-only  # 只构建+暂存,不上传(检查内容用)
 #
 # 首次上传:tools/workshop_item_id.txt 留空 → Steam 自动分配物品 ID,
 #           上传成功后把输出里的 Published File ID 填进该文件(之后即为更新)。
@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP_ID=2868840
-ACCOUNT="${1:?用法: publish_workshop.sh <Steam账号名> [--stage-only]}"
+ACCOUNT="${1:?用法: publish_workshop.sh <Steam 账号名> [--stage-only]}"
 STAGE_ONLY="${2:-}"
 if [ "$STAGE_ONLY" != "--stage-only" ] && [ "$ACCOUNT" = "test" ]; then
   echo "!! 账号名是 'test' —— 像占位符,不是真实 Steam 账号。如确要继续,改脚本里的这行保险。" >&2
@@ -37,11 +37,12 @@ cp src/ItsLoadingCompat/bin/Release/net9.0/ItsLoadingCompat.dll "$STAGE/"
 cp src/ItsLoading/ItsLoading.json src/ItsLoading/mod_image.png "$STAGE/"
 # 素材版权声明(狐狸 LGPL-2.1 出处 + logo AI 生成说明)
 cp LICENSE_CLAIM.md "$STAGE/"
-# minespire 主题素材(© 狐狸 NeoForged contributors, LGPL-2.1;gd 帧 0 经 _mod_dir() 读取)
-cp src/ItsLoading/Themes/Minespire/fox_running.png "$STAGE/"
-cp src/ItsLoading/Themes/Minespire/mc_style_sts2_logo.png "$STAGE/"
-# slaytheshin 主题素材(原神风徽记 1-14 + logo;出处见 LICENSE_CLAIM.md)
-cp src/ItsLoading/Themes/Slaytheshin/slaytheshin_*.png "$STAGE/"
+# gd 启动视图整树(boot.gd + kit.gd + <id>/theme.gd 与主题素材,含
+# 狐狸 © NeoForged contributors, LGPL-2.1;仓库中位于
+# src/ItsLoading/Themes/(与 C# 共用该目录),发行只取 gd 部分不带 .cs)
+mkdir -p "$STAGE/gd"
+cp src/ItsLoading/Themes/boot.gd src/ItsLoading/Themes/kit.gd "$STAGE/gd/"
+cp -R src/ItsLoading/Themes/classic src/ItsLoading/Themes/minespire src/ItsLoading/Themes/gachathespire "$STAGE/gd/"
 # 只带各语言 strings.json(与 install.sh 一致;settings_ui.json 仅走 pck,
 # 松散放置会被游戏 mod 扫描器当 manifest 报错)
 for f in src/ItsLoading/localization/*/strings.json; do

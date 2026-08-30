@@ -41,33 +41,38 @@ owners.
 
 ---
 
-## slaytheshin_1.png … slaytheshin_14.png —— 原神风徽记图标(Slaytheshin 主题 / Slaytheshin theme emblems)
+## gachathespire_1.png … gachathespire_14.png —— 徽记图标(GachaTheSpire 主题 / GachaTheSpire theme emblems)
 
-- 来源 / Origin: 基于《原神》官方图标**重绘**的致敬性二创 / Fan **redrawings**
-  inspired by official *Genshin Impact* emblems
-- 版权 / Copyright: 重绘图案为本 mod 作者制作,无第三方版权主张 /
-  The redrawn artwork was made by the mod author; no third-party copyright claim
+- 来源 / Origin: 基于《Slay the Spire 2》官方图标的二游风格化重绘 /
+  **stylized redrawings** of official *Slay the Spire 2* icons, in
+  gacha-game style
+- 灵感 / Inspiration: 知名二游的界面视觉语言 / the interface visual
+  language of well-known gacha games
+- 版权 / Copyright: 重绘图案为本 mod 作者制作;原图标设计归其权利人所有 /
+  the redrawn artwork was made by the mod author; the original icon designs
+  belong to their respective owner
 
-本 mod 为非官方社区作品,与任何公司或实体(包括但不限于 COGNOSPHERE /
-HoYoverse、MegaCrit)均无关联;《原神》与 Slay the Spire 2 的名称、商标及
-原版素材归其各自权利人所有。
+作者对任何游戏、公司及其作品均无立场,本 mod 也不表达任何官方态度。本 mod
+为《Slay the Spire 2》的非官方社区作品,与 MegaCrit 及其他任何游戏或公司均无
+关联;所有第三方名称、商标及原版素材归其各自权利人所有。
 
-This mod is an unofficial community work and is not affiliated with any company
-or entity (including but not limited to COGNOSPHERE / HoYoverse and MegaCrit);
-Genshin Impact and Slay the Spire 2 names, trademarks and original assets
-belong to their respective owners.
+The author holds no stance on any game, company, or their works, and this mod
+does not express anyone's official position. This mod is an unofficial
+community work for Slay the Spire 2, not affiliated with MegaCrit or any other
+game or company; all third-party names, trademarks and original assets belong
+to their respective owners.
 
-## slaytheshin_logo.png —— 原神风游戏 logo(本 mod 自有素材 / our own asset)
+## gachathespire_logo.png —— 游戏 logo(本 mod 自有素材 / our own asset)
 
 - 来源 / Origin: **AI 生成图像**(作者使用 AI 图像工具制作)/ **AI-generated
   image**, created by the mod author with an AI image tool
+- 灵感 / Inspiration: 同徽记图标 —— 知名二游(抽卡游戏)的界面视觉语汇 /
+  same as the emblems — the interface visual language of gacha games
 - 版权 / Copyright: 无第三方版权主张,作为本 mod 的一部分随 mod 分发 /
   No third-party copyright claim; distributed as part of this mod
 
-该 logo 仅是对《原神》视觉风格的致敬性二创,不与任何公司或实体关联。
-
-The logo is a tribute to Genshin Impact's visual style only and is not
-affiliated with any company or entity.
+立场与归属说明同上一节 / The stance and attribution notes from the previous
+section apply here as well.
 
 ---
 

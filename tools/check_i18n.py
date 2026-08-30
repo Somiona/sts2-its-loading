@@ -6,7 +6,7 @@
   settings_ui.json BaseLib 设置入口的游戏侧 loc(pck 打包,ITSLOADING- 前缀键)
 
 检查项:
-  1. 源码中实际使用的键(C# 的 I18n.T("...") 与 gd 模板的 _t("..."))
+  1. 源码中实际使用的键(C# 的 I18n.T("...") 与 gd 的 _txt("..."))
      必须存在于 eng/strings.json —— 缺 = 错误(构建失败)
   2. 其他语言相对 eng 的缺键 = 警告(逐键回退 eng,部分翻译可用)
   3. 有 strings.json 的语言必须有 settings_ui.json,且三个必需键齐全
@@ -32,7 +32,7 @@ REQUIRED_SETTINGS_KEYS = [
     # 下拉框枚举项(ITSLOADING-THEME.<枚举名>,缺键回退枚举原名);新增主题时同增
     "ITSLOADING-THEME.Classic",
     "ITSLOADING-THEME.Minespire",
-    "ITSLOADING-THEME.Slaytheshin",
+    "ITSLOADING-THEME.GachaTheSpire",
 ]
 
 

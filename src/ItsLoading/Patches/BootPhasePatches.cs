@@ -176,7 +176,7 @@ internal static class BootPhasePatches
         ItsLoading.Timeline.StepStarted(label, I18n.T(label), $"+{ItsLoading.Sw.ElapsedMilliseconds}ms");
     }
 
-    /// <summary>logo/云同步后的启动收尾(LaunchMainMenu 调用点已逆向确认)。只处理一次(时间线内去重)。</summary>
+    /// <summary>logo/云同步后的启动收尾。只处理一次(时间线内去重)。</summary>
     private static void BeforeMainMenu()
     {
         ItsLoading.Timeline.Waypoint(BootWaypoint.MainMenu, I18n.T("bar.opening"), $"+{ItsLoading.Sw.ElapsedMilliseconds}ms");
@@ -187,7 +187,7 @@ internal static class BootPhasePatches
     {
         ItsLoading.Timeline.MenuReady(I18n.T("bar.done"), $"{ItsLoading.Sw.ElapsedMilliseconds}ms");
 
-        // 首启兜底注册瀑布图入口:见 WaterfallViewer.RegisterInBaseLib 的注释
+        // 首次启动的兜底注册:见 WaterfallViewer.RegisterInBaseLib 的注释
         // (此刻 BaseLib 必已加载,LoadedMods 检查在内)
         ItsLoading.Run("register waterfall at menu", WaterfallViewer.RegisterInBaseLib);
 

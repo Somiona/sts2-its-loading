@@ -1,5 +1,5 @@
 #!/bin/bash
-# 构建 It's Loading(不再干等)
+# 构建 It's Loading
 # 引用 dll 由 MSBuild 自动从本机游戏安装解析(三平台路径发现,见 src/ItsLoading/Sts2PathDiscovery.props)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -23,8 +23,8 @@ fi
 # i18n 门禁:eng 缺使用中的键 = 构建失败(set -e 生效);其他语言缺键出警告
 python3 tools/check_i18n.py
 
-# gd 模板门禁:verbatim 引号转义断裂会让生成的 gd 脚本整体解析失败
-# (2026-08-29 实机事故:裸引号 → autoload 全灭);C# 测试覆盖不到模板文本
+# gd 源文件门禁:解析检查 + 桥协议/主题契约完整性 + 几何不变量
+# (C# 测试覆盖不到 gd 文本)
 python3 tools/check_gd_template.py
 
 # 时间线数学回归(纯 BCL,离线跑;本机仅 .NET 10 运行时,故测试工程 target net10.0)
@@ -33,8 +33,8 @@ dotnet test tests/ItsLoadingTimeline.Tests/ItsLoadingTimeline.Tests.csproj -c Re
 dotnet build src/ItsLoading/ItsLoading.csproj -c Release
 dotnet build src/ItsLoadingCompat/ItsLoadingCompat.csproj -c Release
 
-# 本地化 pck(v3 格式,游戏的 4.5.1 fork 实测可加载;勿用 Godot 4.7 PCKPacker——它写 v4 被拒)
-# 语言列表来自 localization/ 目录,新增语言无需改这里
+# 本地化 pck(v3 格式,游戏的 4.5.1 fork 可加载;勿用 Godot 4.7 PCKPacker——
+# 它写 v4,会被游戏拒绝)。语言列表来自 localization/ 目录,新增语言无需改这里
 OUT="src/ItsLoading/bin/Release/net9.0"
 PCK_ARGS=()
 for ui in src/ItsLoading/localization/*/settings_ui.json; do

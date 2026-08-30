@@ -1,78 +1,37 @@
 #!/usr/bin/env python3
-"""gd 启动脚本模板静态门禁(build.sh 构建门禁)。
+"""gd 启动视图源文件静态门禁(build.sh 构建门禁)。
 
-BootSplash.cs 的 BootSplashGdTemplate 是 C# verbatim 字符串(@"..."):
-GDScript 里的一个 `"` 必须写成 `""`。转义一旦断裂,生成物会出现裸引号 →
-整个脚本 Parse Error → autoload 实例化失败,gd 段从帧 0 起全灭
-(C# 测试与 @@token@@ 检查都查不出这一类损伤)。
-
-检查项(不依赖 C# 常量真值,直接在模板文本上验证):
-  1. 模板中每个 @@TOKEN@@ 在 BuildBootSplashGd() 里有对应 Replace 调用
-  2. 把 @@TOKEN@@ 替换为 1.0、反转义 ""→" 之后:每行引号数必须为偶、
-     括号必须配平(字符串与注释已剥离)
-  3. 若找到 Godot 可执行(GODOT_BIN / PATH / /Applications),对替换后的
-     脚本跑一次 --check-only 权威解析;找不到则跳过(仅警告性提示)
+检查项:
+  1. Godot 解析(找到可执行时;GODOT_BIN / PATH / /Applications):
+     对每个 .gd 跑 --check-only 权威解析
+  2. 契约完整性:boot.gd 必须保留桥协议方法/变量(C# GdBridgeBar 与 Handoff
+     依赖);每个 themes/<id>/theme.gd 必须实现主题三动词(theme_build/apply/retire)
+  3. 几何不变量(找到可执行时):tools/check_theme_geometry.gd headless 断言
+     (滑段达轨满/滑段后 set_fraction 归位/全树填充不越轨)
 
 用法:python3 tools/check_gd_template.py  (失败退出码 1,build.sh 的 set -e 生效)
 """
 import os
-import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-BOOT_SPLASH = ROOT / "src" / "ItsLoading" / "BootSplash.cs"
+GD_DIR = ROOT / "src" / "ItsLoading" / "Themes"
+
+# boot.gd 的桥协议面(C# GdBridgeBar.TryBuild / BootSplash.Handoff 依赖)
+BOOT_CONTRACT = [
+    "csharp_attach", "csharp_present", "takeover",
+    "get_workshop_log", "show_hint", "bridge_version", "boot_start_msec",
+]
+# 主题三动词(boot.gd 的 _apply/takeover 依赖)
+THEME_CONTRACT = ["theme_build", "theme_apply", "theme_retire"]
 
 
 def fail(msg: str) -> None:
-    print(f"gd template check: FAIL — {msg}", file=sys.stderr)
+    print(f"gd check: FAIL — {msg}", file=sys.stderr)
     sys.exit(1)
-
-
-def extract_template(src: str) -> str:
-    m = re.search(
-        r'private const string BootSplashGdTemplate = @"extends Node(.*?)\n";\n',
-        src, re.S)
-    if not m:
-        fail("BootSplashGdTemplate 未找到(模板结构变了?请同步本检查)")
-    return "extends Node" + m.group(1) + "\n"
-
-
-def check_tokens(src: str, template: str) -> None:
-    used = set(re.findall(r"@@[A-Z_]+@@", template))
-    provided = set(re.findall(r'\.Replace\("(@@[A-Z_]+@@)"', src))
-    missing = used - provided
-    if missing:
-        fail(f"模板 token 无 Replace 提供: {sorted(missing)}")
-    print(f"  tokens: {len(used)} 个全部有 Replace")
-
-
-def materialize(template: str) -> str:
-    # 哑替换需按类型:颜色 token 落在 Color 形参位(1.0 会触发类型错误),
-    # 其余 token 数值位置合法;字符串位置(如 "".."" 内)任何字面量都无害
-    out = re.sub(r"@@[A-Z_]*COLOR@@", "Color(1, 1, 1, 1)", template)
-    out = re.sub(r"@@[A-Z_]+@@", "1.0", out)
-    return out.replace('""', '"')
-
-
-def check_quotes_and_parens(script: str) -> None:
-    bad = [f"{i}: {line}" for i, line in enumerate(script.splitlines(), 1)
-           if line.count('"') % 2]
-    if bad:
-        fail("奇数引号(verbatim 转义断裂,会生成裸引号):\n  " + "\n  ".join(bad))
-    depth = 0
-    for i, line in enumerate(script.splitlines(), 1):
-        code = re.sub(r'"[^"]*"', '""', line)   # 剥字符串字面量
-        code = re.sub(r"#.*$", "", code)         # 剥注释
-        depth += code.count("(") - code.count(")")
-        if depth < 0:
-            fail(f"第 {i} 行括号提前闭合")
-    if depth != 0:
-        fail(f"括号不配平(净深度 {depth})")
-    print("  引号奇偶 / 括号配平: 通过")
 
 
 def find_godot() -> str | None:
@@ -91,35 +50,59 @@ def find_godot() -> str | None:
     return None
 
 
-def check_parse(script: str) -> None:
-    godot = find_godot()
+def check_parse(godot: str | None, path: Path) -> None:
     if not godot:
-        print("  Godot 解析: 跳过(未找到可执行;可设 GODOT_BIN 启用)")
         return
-    with tempfile.NamedTemporaryFile("w", suffix=".gd", delete=False) as f:
-        f.write(script)
-        path = f.name
-    try:
-        r = subprocess.run(
-            [godot, "--headless", "--check-only", "-s", path],
-            capture_output=True, text=True, timeout=60)
-    finally:
-        os.unlink(path)
+    r = subprocess.run(
+        [godot, "--headless", "--check-only", "-s", str(path)],
+        capture_output=True, text=True, timeout=60)
     errors = [l for l in (r.stdout + r.stderr).splitlines()
               if "SCRIPT ERROR" in l or "Parse Error" in l]
     if errors:
-        fail("Godot 解析失败:\n  " + "\n  ".join(errors[:5]))
-    print(f"  Godot 解析({Path(godot).name}): 通过")
+        fail(f"{path.name} 解析失败:\n  " + "\n  ".join(errors[:5]))
+    print(f"  解析({path.name}): 通过")
+
+
+def check_geometry(godot: str | None) -> None:
+    if not godot:
+        print("  几何不变量: 跳过(未找到可执行;可设 GODOT_BIN 启用)")
+        return
+    script = ROOT / "tools" / "check_theme_geometry.gd"
+    r = subprocess.run(
+        [godot, "--headless", "-s", str(script)],
+        capture_output=True, text=True, timeout=60, cwd=str(ROOT))
+    out = r.stdout + r.stderr
+    if r.returncode != 0 or "GEOM FAIL" in out:
+        errs = [l for l in out.splitlines() if "FAIL" in l or "SCRIPT ERROR" in l]
+        fail("几何不变量失败:\n  " + "\n  ".join(errs[:6]))
+    print("  几何不变量(kit 裸控件 + 3 主题矩阵): 通过")
+
+
+def check_contract(path: Path, symbols: list[str], what: str) -> None:
+    src = path.read_text(encoding="utf-8")
+    missing = [s for s in symbols if s not in src]
+    if missing:
+        fail(f"{path.name} 缺{what}: {missing}")
 
 
 def main() -> None:
-    src = BOOT_SPLASH.read_text(encoding="utf-8")
-    template = extract_template(src)
-    print("gd template check:")
-    check_tokens(src, template)
-    script = materialize(template)
-    check_quotes_and_parens(script)
-    check_parse(script)
+    files = sorted(GD_DIR.rglob("*.gd"))
+    if not files:
+        fail(f"{GD_DIR} 下没有 .gd 文件(目录结构变了?请同步本检查)")
+    godot = find_godot()
+    if not godot:
+        print("  Godot 解析: 跳过(未找到可执行;可设 GODOT_BIN 启用)")
+
+    print(f"gd source check({len(files)} 个文件):")
+    check_contract(GD_DIR / "boot.gd", BOOT_CONTRACT, "桥协议面")
+    for theme in sorted(GD_DIR.iterdir()):
+        if theme.is_dir():
+            check_contract(theme / "theme.gd", THEME_CONTRACT, "主题三动词")
+    print("  契约(boot 桥协议 / 主题三动词): 通过")
+
+    for f in files:
+        check_parse(godot, f)
+    check_geometry(godot)
     print("  OK")
 
 

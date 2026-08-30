@@ -2,7 +2,7 @@
 # 构建 + 安装到 CrossOver/Wine 瓶内的 Windows 版 STS2。
 # 路径来自 .env 的 STS2_WIN_GAME_DIR(模板见 .env.example);含全部门禁与测试。
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")"
 
 [ -f .env ] && source .env
 GAME_DIR="${STS2_WIN_GAME_DIR:?请在 .env 设置 STS2_WIN_GAME_DIR(参考 .env.example)}"

@@ -13,9 +13,9 @@ namespace ItsLoading;
 //
 // 菜单就绪后才可打开的调试 UI,只读冻结后的 Api.LoadingDurations 数据,
 // 不参与启动路径。
-// 对外接口:RegisterInBaseLib(BaseLib 软依赖注册)+ CompatHooks(垫片回调)。
+// 对外入口:RegisterInBaseLib(BaseLib 软依赖注册)+ CompatHooks(垫片回调)。
 // 类必须 public:ItsLoadingCompat.dll(另一程序集)经 CompatHooks 回调进来;
-// 其余成员 internal/private,公开面就这一个回调入口。
+// 其余成员 internal/private,公开的就这一个回调入口。
 
 public static class WaterfallViewer
 {
@@ -26,18 +26,19 @@ public static class WaterfallViewer
     private static bool _wfDetailed;
 
     /// <summary>
-    /// BaseLib 已加载时注册(常规路径 = AfterModLoad 观察到 BaseLib 加载完成;
-    /// 兜底路径 = 菜单就绪时补注册)。BaseLib 的配置体系:SimpleModConfig 子类 +
-    /// [ConfigButton] 方法;行标签 = 方法名(本地化缺失时原文回退)。
-    /// 软依赖实现:编译期引用 refs/BaseLib.dll(不入库),注册调用放在
-    /// 本方法里 —— BaseLib 缺席时它永不被调用、WaterfallConfig 类型永不加载
+    /// BaseLib 已加载时注册瀑布图入口(常规路径 = AfterModLoad 观察到 BaseLib
+    /// 加载完成;兜底路径 = 菜单就绪时补注册)。
+    /// BaseLib 的配置体系:SimpleModConfig 子类 + [ConfigButton] 方法,
+    /// 行标签 = 方法名(本地化缺失时原文回退)。
+    /// 软依赖实现:编译期引用 refs/BaseLib.dll(不入库),注册调用只出现在
+    /// 本方法 —— BaseLib 缺席时它永不被调用、WaterfallConfig 类型永不加载
     /// (JIT 按方法惰性解析),不影响本 mod。
-    /// BaseLib 类型只存在于独立的兼容垫片 ItsLoadingCompat.dll 中 —— 主 dll
-    /// 绝不引用 BaseLib(否则 ModManager 的 assembly.GetTypes() 会在 BaseLib
-    /// 未加载时抛 ReflectionTypeLoadException),垫片在此刻
-    /// 手动 LoadFrom,类型解析必然成功。
-    /// 首启时我们排在队尾,BaseLib 早在补丁安装前加载完,AfterModLoad 不可能
-    /// 观察到它 —— 没有兜底的话瀑布图入口要等到第二次启动才存在。
+    /// BaseLib 类型只存在于兼容垫片 ItsLoadingCompat.dll —— 主 dll 绝不引用
+    /// BaseLib(否则 ModManager 的 assembly.GetTypes() 会在 BaseLib 未加载时抛
+    /// ReflectionTypeLoadException);垫片在确认 BaseLib 已加载后手动 LoadFrom,
+    /// 类型解析必然成功。
+    /// 首次安装时我们排在队尾,BaseLib 早在补丁安装前加载完,AfterModLoad
+    /// 观察不到它 —— 没有兜底的话瀑布图入口要等到第二次启动才存在。
     /// </summary>
     internal static void RegisterInBaseLib()
     {
@@ -65,11 +66,11 @@ public static class WaterfallViewer
 
     /// <summary>
     /// 垫片依赖的显式解析兜底。游戏的 HandleAssemblyResolveFailure 只兜 sts2/0Harmony,
-    /// 垫片引用的 BaseLib 全链无人解析:Wine 下实测 AfterModLoad 早注册路径中
-    /// JIT 编译 Entry.Register 时按全名绑定「已加载的」BaseLib 失败
+    /// 垫片引用的 BaseLib 全链无人解析:Wine 下 AfterModLoad 早注册路径中,
+    /// JIT 编译 Entry.Register 时按全名绑定「已加载的」BaseLib 会失败
     /// (FileNotFoundException,报错穿过 Harmony/MonoMod 的 JIT 钩子)。挂 Default ALC
-    /// 的 Resolving,按简单名返回已加载实例——绑定必成,与平台/加载顺序无关;
-    /// macOS 正常路径探测本就命中,此兜底不触发,零影响。
+    /// 的 Resolving,按简单名返回已加载实例 —— 绑定必成,与平台/加载顺序无关;
+    /// macOS 正常路径本就命中,此兜底不触发。
     /// </summary>
     private static bool _shimResolverInstalled;
     private static void InstallShimResolver()
@@ -109,16 +110,12 @@ public static class WaterfallViewer
                 Close();
                 return;
             }
-            // 阶段埋点:Wine 下原生崩溃无托管异常可捕(点开即死、
-            // "waterfall opened" 未达)。逐阶段一行日志,复现时最后一行即崩溃点。
-            Log.Warn("[ItsLoading] wf stage 1: i18n reload");
             // 玩家可能在本次会话内切换过语言(SettingsSave.Language 是实时值)——
             // 进度条阶段的表在启动时加载,瀑布图打开时重读一次(懒刷新)。
             I18n.Init();
             var tree = (SceneTree)Engine.GetMainLoop();
             Vector2 vs = tree.Root.GetVisibleRect().Size;
 
-            Log.Warn("[ItsLoading] wf stage 2: layer + dim");
             _waterfallLayer = new CanvasLayer { Layer = 1200 };
 
             var dim = new ColorRect { Color = new Color(0f, 0f, 0f, 0.92f) };
@@ -163,11 +160,9 @@ public static class WaterfallViewer
 
             if (Api.LoadingDurations.IsReady)
             {
-                Log.Warn("[ItsLoading] wf stage 3: chart build");
                 BuildWaterfallChart(_waterfallLayer, vs);
             }
 
-            Log.Warn("[ItsLoading] wf stage 4: attach to tree");
             tree.Root.AddChild(_waterfallLayer);
 
             // 输入接入游戏的热键栈(NHotkeyManager 挂在 NGame,菜单/局内常驻——设置页
@@ -178,7 +173,6 @@ public static class WaterfallViewer
             var hm = MegaCrit.Sts2.Core.Nodes.CommonUi.NHotkeyManager.Instance;
             if (hm != null)
             {
-                Log.Warn("[ItsLoading] wf stage 5: hotkey bindings");
                 hm.AddBlockingScreen(_waterfallLayer);
                 hm.PushHotkeyPressedBinding(
                     MegaCrit.Sts2.Core.ControllerInput.MegaInput.cancel, Close);
@@ -230,9 +224,10 @@ public static class WaterfallViewer
     };
 
     /// <summary>
-    /// 渲染层的空白填补(纯展示,不写入 Api 数据——公开 API 保持纯测量语义):
-    /// ① 首行之前的空白:首启时我们可观测之前的「游戏预加载」段(引擎 C++ 初始化 +
-    ///    Steam 读取 + 工坊扫描,C# 侧看不到),占位提示下次启动可获完整数据;
+    /// 渲染层的空白填补(纯展示,不写入 Api 数据 —— 公开 API 保持纯测量语义):
+    /// ① 首行之前的空白:首次启动时早于我们可观测起点的「游戏预加载」段
+    ///    (引擎 C++ 初始化 + Steam 读取 + 工坊扫描,C# 侧看不到),占位提示
+    ///    下次启动可获完整数据;
     /// ② prelude 行结束与首个 mod 行之间的窄缝:本 mod 自身的 dll 加载与 Init
     ///    (自身 TryLoadMod 的 prefix 装不上补丁,起点只能近似,可能留缝)。
     /// 两个填补都只在缝隙实际存在(>阈值)时出现。
@@ -281,8 +276,8 @@ public static class WaterfallViewer
     {
         double total = Math.Max(1.0, Api.LoadingDurations.TotalBootMs);
         // 时间轴跨度 = 总时长 + 3s 尾部空白:滚动到头时最后一个条与刻度标签
-        // 完整可见,且终点之后留有呼吸空间。条的锚定分母一律用 span,
-        // 而不是 total——空白是锚定区之外的固有留白。
+        // 完整可见,终点之后也留有余量。条的锚定分母一律用 span 而不是
+        // total —— 空白是锚定区之外的固有留白。
         double span = total + 3000.0;
 
         // 汇总所有 span,按时间轴排序
@@ -419,8 +414,8 @@ public static class WaterfallViewer
             };
             row.AddChild(barArea);
 
-            // 数值加固:锚点必须落在 [0,1] 且非 NaN——负 StartMs(gd 锚点交接缝)或
-            // 病态时长直接进 Godot 原生布局,在 Wine 渲染栈上是潜在原生崩溃源。
+            // 数值加固:锚点必须落在 [0,1] 且非 NaN——负 StartMs(gd 锚点交接的
+            // 缝隙)或病态时长直接进 Godot 原生布局,在 Wine 渲染栈上是潜在原生崩溃源。
             float start = (float)Math.Clamp(s.StartMs / span, 0.0, 1.0);
             float end = (float)Math.Clamp((s.StartMs + s.DurationMs) / span, 0.0, 1.0);
             if (float.IsNaN(start) || float.IsNaN(end) || end < start)
@@ -435,7 +430,7 @@ public static class WaterfallViewer
             {
                 Color = baseColor,
                 Visible = false,
-                // 纯视觉:不吃鼠标。否则指在条内部时悬浮目标是条自身而非
+                // 纯视觉:不响应鼠标。否则指在条内部时悬浮目标是条自身而非
                 // barArea,联动高亮只在条外沿触发。
                 MouseFilter = Control.MouseFilterEnum.Ignore,
             };

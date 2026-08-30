@@ -141,7 +141,7 @@ public class BootTimelineTests
         Assert.Equal("A", span.Id);
         Assert.Equal("Loaded", span.Detail);
         Assert.Equal(300.0, span.DurationMs, 1);        // prefix→postfix 真实区间
-        // 引擎毫秒起点 = 偏移(构造对表于 ticks=0 ↔ engine=10000) + 1000ms
+        // 引擎毫秒起点 = 偏移(构造时对齐于 ticks=0 ↔ engine=10000) + 1000ms
         Assert.Equal(11_000.0, span.StartMs, 1);
     }
 

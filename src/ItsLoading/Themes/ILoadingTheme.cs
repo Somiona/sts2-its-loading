@@ -37,15 +37,15 @@ internal readonly record struct LoadingViewState(
 }
 #nullable restore
 
-// ---------------------------------------------------------------- 主题缝
+// ---------------------------------------------------------------- 主题接口
 //
-// 主题 = 启动加载指示器的一种呈现,挂在 BootTimeline.Presenter 上:
+// 主题 = 加载指示器的一种呈现,挂在 BootTimeline.Presenter 上:
 //   Build   —— Init 里建 UI(直接挂 Root;同步突发期禁 Container/deferred)
-//   Present —— 就是 Presenter 目标;调用密度 = 真实加载活动密度
-//   Retire  —— 菜单就绪 + 2s 弥留后由编排层调用;gd splash 的 takeover 不归主题管
-// 刻度数学、span 记录全部在 BootTimeline——主题只管"长什么样"。
-// 经典主题正常路径由帧 0 gd 节点持续呈现;本接口同时保留 C# ClassicBar 兜底
-// (首装/脚本协议不匹配),二者消费同一 LoadingViewState。
+//   Present —— 即 Presenter 目标;调用密度 = 真实加载活动密度
+//   Retire  —— 菜单就绪 + 2s 停留后由编排层调用;gd splash 的 takeover 不归主题管
+// 刻度数学、span 记录全部在 BootTimeline —— 主题只管"长什么样"。
+// 实现只有 GdBridgeBar:正常路径桥接帧 0 autoload 节点;首装/版本过渡/
+// 旧视图已关闭走晚期托管(同一份 gd 主题代码,见 Themes/boot.gd 与 BootSplash)。
 
 /// <summary>加载指示器主题接口。</summary>
 #nullable enable
@@ -57,31 +57,32 @@ internal interface ILoadingTheme
     /// <summary>呈现一次完整不可变快照。</summary>
     void Present(LoadingViewState state);
 
-    /// <summary>退休:置死亡标志(挡住条移除后仍可能触发的 postfix)+ 释放自身节点。</summary>
+    /// <summary>移除:置死亡标志(挡住移除后仍可能触发的 postfix)+ 释放自身节点。</summary>
     void Retire();
 }
 #nullable restore
 
 /// <summary>
 /// 可选的加载主题。枚举名即持久化值(BaseLib cfg 里存 "Classic"/"Minespire",
-/// gd 侧 to_lower 后比较);新增主题 = 加枚举值 + FallbackFactories 一行 +
-/// gd 模板一个布局分支 + settings_ui.json 枚举项本地化键,其余管线全部泛化。
+/// gd 侧 to_lower 后对应 themes/&lt;小写名&gt;/ 文件夹);新增主题 = 建
+/// Themes/&lt;id&gt;/theme.gd + 加枚举值 + settings_ui.json 枚举项本地化键,
+/// 其余管线(registry/桥/kit/boot)均已泛化,无需改动。
 /// </summary>
 public enum LoadingTheme
 {
     Classic,
     Minespire,
-    Slaytheshin,
+    GachaTheSpire,
 }
 
 /// <summary>
 /// 主题注册表与选择。主题值存于 BaseLib 标准配置文件 user://mod_configs/ItsLoading.cfg
-/// (JSON {"Theme": "…"},gd 模板经 @@THEME_CFG_PATH@@ token 读同一文件):
+/// (JSON {"Theme": "…"},gd 侧 boot.gd 的 _read_theme 读同一文件):
 ///   · 读永远直读文件(gd 帧 0 / C# ThemeRegistry / BaseLib 下拉框 getter 透传)——
 ///     绝不依赖 BaseLib 加载,BaseLib 缺席时仅无切换 UI,功能完整
 ///   · 写只走配置界面(下拉框 setter → TrySet 同步原子写;BaseLib 自身的
 ///     debounce/退出保存随后幂等重写同值)
-///   · Init 的 MigrateToCfg 保证文件自第一启起就带 Theme 键(自带默认 cfg),
+///   · Init 的 MigrateToCfg 保证文件从首次启动起就带 Theme 键(自带默认 cfg),
 ///     并把旧 itsloading_theme.txt 的值并入后删除
 /// 不声明 BaseLib 依赖:游戏的依赖是拓扑排序强制(必排我们前面),会破坏
 /// load-order #0 调整(见 ItsLoading.EnsureFirstInLoadOrder)。
@@ -101,19 +102,11 @@ internal static class ThemeRegistry
 
     internal const LoadingTheme Default = LoadingTheme.Classic;
 
-    // C# 兜底主题工厂(首启/桥版本不匹配时构建;正常路径布局在 gd 模板里)
-    private static readonly Dictionary<LoadingTheme, Func<ILoadingTheme>> FallbackFactories = new()
-    {
-        [LoadingTheme.Classic] = static () => new ClassicBar(),
-        [LoadingTheme.Minespire] = static () => new MinespireBar(),
-        [LoadingTheme.Slaytheshin] = static () => new SlaytheshinBar(),
-    };
-
     /// <summary>当前主题(直读 cfg;缺失/非法值回默认,任何 IO 异常同)。</summary>
     internal static LoadingTheme Current() =>
         ParseThemeValue(TryReadText(ProjectSettings.GlobalizePath(CfgPath))) ?? Default;
 
-    /// <summary>配置界面写入:同步原子写(保留 cfg 里其他键),封死防抖/强退窗口。</summary>
+    /// <summary>配置界面写入:同步原子写(保留 cfg 里其他键),避免防抖/强退丢失写入。</summary>
     internal static bool TrySet(LoadingTheme theme)
     {
         try
@@ -128,16 +121,6 @@ internal static class ThemeRegistry
             Log.Error($"[ItsLoading] FAILED to persist theme choice: {e}");
             return false;
         }
-    }
-
-    /// <summary>构建当前主题的 C# 兜底并建 UI(Init 的 build bar 步骤)。</summary>
-    internal static ILoadingTheme BuildActive()
-    {
-        var theme = FallbackFactories.TryGetValue(Current(), out var factory)
-            ? factory()
-            : new ClassicBar();
-        theme.Build();
-        return theme;
     }
 
     /// <summary>

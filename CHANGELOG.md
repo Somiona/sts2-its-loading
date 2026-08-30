@@ -7,6 +7,8 @@ changenote 随版本号发出,上传成功后自动把该区改标为发布的�
 
 ## Unreleased
 
+- 主题的底层整个换了个更聪明的写法,以后出新主题会快很多,三款现有主题长相不变喵
+  - The theme internals were rebuilt on a much smarter foundation — future themes will arrive faster, and the three existing ones look exactly the same nya
 - 新主题来啦!经典抽卡游戏风格的主题,在设置里选择,下次启动生效喵
   - A new theme has arrived~ a classic gacha-game-style theme. Pick it in the settings, active from the next launch nya
 

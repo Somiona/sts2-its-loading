@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """构建 Godot 4.5 格式(pack_version=3)的 mod 图标 PCK。
 
-格式为对 BaseLib.pck(v3, engine 4.5.1, 游戏实测可加载)逐字节逆向所得:
+格式逆向自 BaseLib.pck(v3, engine 4.5.1,游戏可加载):
   header(112B): magic GDPC / v3 / 引擎版本 / flags=2 / file_base / 表偏移 / 保留零
   data:         文件内容裸放,offset 相对 file_base,16 字节对齐
   table(尾部): count + [plen][path\\0][u64 ofs][u64 size][md5][u32 flags],贴 EOF
@@ -46,7 +46,7 @@ def build(out_path: str, files: list) -> None:
 
 
 if __name__ == "__main__":
-    # 用法: build_pck.py <out.pck> <res路径(无res://前缀)> <本地文件> [更多对...]
+    # 用法: build_pck.py <out.pck> <res 路径(无 res:// 前缀)> <本地文件> [更多对...]
     out = sys.argv[1]
     files = [(sys.argv[i], sys.argv[i + 1]) for i in range(2, len(sys.argv), 2)]
     build(out, files)

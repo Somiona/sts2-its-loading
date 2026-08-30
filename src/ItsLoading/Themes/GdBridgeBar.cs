@@ -4,34 +4,41 @@ using MegaCrit.Sts2.Core.Logging;
 
 namespace ItsLoading;
 
-// ---------------------------------------------------------------- 持久 gd 启动视图适配器
+// ---------------------------------------------------------------- gd 启动视图的 C# host
 //
-// 帧 0 起就在场的 LoadingBarBoot gd 节点独占全程加载 UI——
-// C# 不再造 ClassicBar,BootTimeline 的快照原样转发给该节点。
+// 帧 0 起就在场的 LoadingBarBoot bootstrap 节点独占全程加载 UI —— C# 不再
+// 自建条,BootTimeline 的快照原样转发给它;主题视觉全部在 gd 侧(boot.gd
+// 装载主题)。
 //
-// 协议(与 BootSplash.cs 模板内 gd 侧成对,破坏性变更必须双侧同步升版本):
-//   csharp_attach()                    —— 接管确认:停工坊轮询/shimmer/30s 安全网,
-//                                         节点保持可见、不被隐藏或替换
-//   csharp_present(overall, local, stage,
-//                  step, detail)        —— 双条完整快照
-//   bridge_version(实例变量,Get 读取) —— 精确版本协商;不匹配则回退 ClassicBar
-// 退休:本类不拥有节点——按 ILoadingTheme 契约,隐藏仍归 BootSplash.Takeover()。
+// 获得宿主节点的两条路径,同一份 gd 代码:
+//   1. autoload 节点(正常路径):帧 0 起在场,版本精确匹配且未关闭 → 直接 attach
+//   2. 晚期托管(兜底路径):autoload 缺席(首次安装)/ 版本不匹配(过渡启动)/
+//      已被自身安全网提前关闭(attach 到已隐藏的视图 = 全程无条)——
+//      takeover 掉旧节点,从磁盘以 CACHE_MODE_IGNORE 实例化本次启动刚刷新的
+//      boot.gd,attach 新实例。三种情况主题显示都不受影响。
 //
+// 协议(与 Themes/boot.gd 成对,破坏性变更双侧同步升版本):
+//   csharp_attach() / csharp_present(overall, local, stage, step, detail) /
+//   takeover() / show_hint(text) —— 桥接后调用
+//   bridge_version(实例变量,Get 读取)—— 精确版本协商
+//   _done(实例变量,Get 读取)—— 关闭标志,探测用
+// 移除:本类拥有所宿节点 —— Retire 直接对它调 takeover()(淡出或立即隐藏由 gd 决定)。
 internal sealed class GdBridgeBar : ILoadingTheme
 {
-    internal const int BridgeVersion = 2;
+    internal const int BridgeVersion = 9;
 
     private readonly Godot.Node _node;
-    private bool _dead;       // 退休后挡住仍可能触发的 postfix Present(同 ClassicBar 死亡标志)
-    private int _presents;    // 退休时汇总，便于确认全程由同一视图消费
+    private readonly bool _lateHosted;
+    private bool _dead;       // 移除后挡住仍可能触发的 postfix Present
+    private int _presents;    // 移除时的摘要行用,确认全程由同一视图消费
 
-    private GdBridgeBar(Godot.Node node) => _node = node;
+    private GdBridgeBar(Godot.Node node, bool lateHosted)
+    {
+        _node = node;
+        _lateHosted = lateHosted;
+    }
 
-    /// <summary>
-    /// 探测兼容性并构建(成功即已 Build/attach,失败返回 null 回退 ClassicBar)。
-    /// 失败三态各有诊断:节点不在场(首装/override.cfg 未采用)、在场但脚本旧
-    /// (本次运行内存里是旧版,Install 已排队重写、下次启动生效)、缺桥方法。
-    /// </summary>
+    /// <summary>探测/晚期托管并构建(成功即已 Build/attach,失败返回 null = 本次启动没有加载 UI)。</summary>
     internal static GdBridgeBar TryBuild()
     {
         Godot.Node node = null;
@@ -41,47 +48,103 @@ internal sealed class GdBridgeBar : ILoadingTheme
         }
         catch (Exception e)
         {
-            Log.Warn($"[ItsLoading] gd bridge probe failed ({e.Message}) — ClassicBar fallback");
-            return null;
-        }
-        if (node == null)
-        {
-            Log.Warn("[ItsLoading] no compatible gd boot view (first run after install, " +
-                     "or override.cfg not applied) — ClassicBar fallback");
+            Log.Warn($"[ItsLoading] gd bridge probe failed ({e.Message})");
             return null;
         }
 
+        // 正常路径:在场、版本精确匹配、未关闭
+        if (node != null && VersionOk(node) && !IsRetired(node))
+        {
+            return Attach(node, lateHosted: false);
+        }
+
+        if (node != null)
+        {
+            ItsLoading.Run("takeover stale boot view", () => node.Call("takeover"));
+        }
+
+        Godot.Node fresh = InstantiateFresh();
+        if (fresh != null && VersionOk(fresh) && !IsRetired(fresh))
+        {
+            return Attach(fresh, lateHosted: true);
+        }
+
+        Log.Warn("[ItsLoading] no usable gd boot view — no loading UI this boot " +
+                 "(gd files missing or failed to load; see refresh/late-host logs above)");
+        return null;
+    }
+
+    /// <summary>从磁盘实例化本次启动刚刷新的 bootstrap(CACHE_MODE_IGNORE:绕过旧实例已载入的资源缓存)。</summary>
+    private static Godot.Node InstantiateFresh()
+    {
+        try
+        {
+            var script = ResourceLoader.Load<GDScript>(BootSplash.BootGdUserPath, "",
+                ResourceLoader.CacheMode.Ignore);
+            if (script == null)
+            {
+                Log.Warn("[ItsLoading] late host: GDScript load returned null " +
+                         $"({BootSplash.BootGdUserPath})");
+                return null;
+            }
+            var node = script.New().As<Node>();
+            if (node == null)
+            {
+                Log.Warn("[ItsLoading] late host: script.New() did not yield a Node");
+                return null;
+            }
+            // _ready 全流程:自检 → 读 cfg → 装主题 → 建 UI;随后 attach 停掉前奏轮询
+            ((SceneTree)Engine.GetMainLoop()).Root.AddChild(node);
+            Log.Warn("[ItsLoading] late host: fresh boot.gd instantiated from disk");
+            return node;
+        }
+        catch (Exception e)
+        {
+            Log.Warn($"[ItsLoading] late host failed ({e.Message})");
+            return null;
+        }
+    }
+
+    /// <summary>调用形状必须精确匹配;新增方法/参数不升版,破坏性变更双侧同步升版。</summary>
+    internal static bool VersionCompatible(int nodeVersion) => nodeVersion == BridgeVersion;
+
+    private static bool VersionOk(Godot.Node node)
+    {
         Variant v = node.Get("bridge_version");
-        if (v.VariantType != Variant.Type.Int || !VersionCompatible(v.AsInt32()))
-        {
-            string found = v.VariantType == Variant.Type.Int ? v.AsInt32().ToString() : "missing";
-            Log.Warn($"[ItsLoading] gd boot view version mismatch " +
-                     $"(bridge_version={found}) — " +
-                     $"gd rewrite queued this run, bridge active from next launch; ClassicBar fallback now");
-            return null;
-        }
-        if (!node.HasMethod("csharp_attach") || !node.HasMethod("csharp_present"))
-        {
-            Log.Warn("[ItsLoading] gd boot view missing bridge methods — ClassicBar fallback");
-            return null;
-        }
+        return v.VariantType == Variant.Type.Int
+            && VersionCompatible(v.AsInt32())
+            && node.HasMethod("csharp_attach")
+            && node.HasMethod("csharp_present");
+    }
 
-        var bridge = new GdBridgeBar(node);
+    /// <summary>旧视图可能已被自身安全网提前关闭(隐藏但节点还在)——关闭了就不复用。</summary>
+    private static bool IsRetired(Godot.Node node)
+    {
+        Variant done = node.Get("_done");
+        return done.VariantType == Variant.Type.Bool && done.AsBool();
+    }
+
+    private static GdBridgeBar Attach(Godot.Node node, bool lateHosted)
+    {
+        var bridge = new GdBridgeBar(node, lateHosted);
         bridge.Build();
         return bridge;
     }
 
-    /// <summary>调用形状必须精确匹配；加法式协议保持同版，破坏性变更双侧升版。</summary>
-    internal static bool VersionCompatible(int nodeVersion) => nodeVersion == BridgeVersion;
-
-    /// <summary>接管:通知 gd 停轮询/shimmer(不隐藏不替换节点)。无自建 UI —— 帧 0 起它就在场。</summary>
+    /// <summary>接管:通知 gd 停前奏轮询(不隐藏不替换节点);首次注入时挂提示。</summary>
     public void Build()
     {
         _node.Call("csharp_attach");
-        Log.Warn("[ItsLoading] persistent gd boot view attached — ClassicBar not constructed");
+        if (BootSplash.InjectedThisRun && _node.HasMethod("show_hint"))
+        {
+            _node.Call("show_hint", I18n.T("hint.injected"));
+        }
+        Log.Warn(_lateHosted
+            ? "[ItsLoading] late-hosted fresh boot view attached — theme-faithful UI for this boot"
+            : "[ItsLoading] persistent gd boot view attached");
     }
 
-    /// <summary>转发 BootTimeline.Present 到 gd 节点;forceDraw 时在 C# 侧配对强制出帧(同 ClassicBar)。</summary>
+    /// <summary>转发 BootTimeline.Present 到 gd 节点;forceDraw 时在 C# 侧配对强制出帧。</summary>
     public void Present(LoadingViewState state)
     {
         if (_dead || !GodotObject.IsInstanceValid(_node)) return;
@@ -95,10 +158,20 @@ internal sealed class GdBridgeBar : ILoadingTheme
         });
     }
 
-    /// <summary>退休:置死亡标志即可——节点隐藏归 BootSplash.Takeover()(ILoadingTheme 契约)。</summary>
+    /// <summary>
+    /// 移除:置死亡标志 + 对所宿节点调 takeover(淡出/立即隐藏由 gd 按帧是否
+    /// 流动决定),并打一行摘要 —— 版本/主题/宿主/presents/nan 压缩进一行,
+    /// 终端用户拷贝 godot.log 即可远程诊断(帧数另见 gd 侧
+    /// "splash dismissed at frame N")。
+    /// </summary>
     public void Retire()
     {
         _dead = true;
-        Log.Warn($"[ItsLoading] gd boot view retired after {_presents} presents");
+        ItsLoading.Run("dismiss boot view", () => _node.Call("takeover"));
+        string theme = _node.Get("_theme_id").AsString();
+        int nan = _node.Get("_nan_count").AsInt32();
+        Log.Warn($"[ItsLoading] boot view retired: " +
+                 $"v{typeof(ItsLoading).Assembly.GetName().Version} theme={theme} " +
+                 $"host={(_lateHosted ? "late-host" : "autoload")} presents={_presents} nan={nan}");
     }
 }

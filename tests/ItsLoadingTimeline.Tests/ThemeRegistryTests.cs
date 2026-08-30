@@ -12,8 +12,7 @@ public sealed class ThemeRegistryTests
     [InlineData("{\"Theme\": \"Minespire\"}", LoadingTheme.Minespire)]
     [InlineData("{\"Theme\": \"minespire\"}", LoadingTheme.Minespire)] // 小写(手改/迁移源)
     [InlineData("{\"Theme\": \"Classic\"}", LoadingTheme.Classic)]
-    [InlineData("{\"Theme\": \"Slaytheshin\"}", LoadingTheme.Slaytheshin)]
-    [InlineData("{\"Theme\": \"slaytheshin\"}", LoadingTheme.Slaytheshin)] // 小写(手改/迁移源)
+    [InlineData("{\"Theme\": \"gachathespire\"}", LoadingTheme.GachaTheSpire)] // 小写(手改/迁移源)
     [InlineData("{\n  \"Theme\": \"Minespire\"\n}", LoadingTheme.Minespire)] // BaseLib WriteIndented 格式
     public void ParseThemeValue_reads_valid(string json, LoadingTheme expected)
         => Assert.Equal(expected, ThemeRegistry.ParseThemeValue(json));
@@ -21,7 +20,7 @@ public sealed class ThemeRegistryTests
     [Theory]
     [InlineData(null)]
     [InlineData("")]
-    [InlineData("{}")]                     // 空对象(按钮时代遗留的空 cfg)
+    [InlineData("{}")]                     // 空对象(旧版本遗留的空 cfg)
     [InlineData("{\"Other\": \"x\"}")]
     [InlineData("{\"Theme\": 5}")]          // 非字符串
     [InlineData("{\"Theme\": \"Banana\"}")] // 未知主题(未来移除的主题 id)

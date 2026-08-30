@@ -10,14 +10,14 @@ namespace ItsLoading;
 
 // ---------------------------------------------------------------- 启动时间线
 //
-// 单一写缝:Harmony 钩子只报事实(mod/步骤/会话/路标),本类拥有——
+// 进度与 span 只由本类写入:Harmony 钩子只上报事实(mod/步骤/会话/路标)——
 //   · 0→1 进度刻度表(Steps 分数、SessionRanges 子区间、路标分数)
-//   · 全部 span 记录(Api.LoadingDurations 是它的只读查询面)
+//   · 全部 span 记录(Api.LoadingDurations 只读查询)
 //   · 锚点与时钟换算(EngineOffset、BootAnchor、TotalBootMs)
 //   · 冻结语义(菜单就绪后数据封存)
-// 呈现为推模型:每个事件发布一份完整 LoadingViewState(全程 + 当前阶段双进度)
-// 给 Presenter——这也是主题缝的时钟;Present 调用密度 = 真实加载活动密度。
-// 文案由钩子解析后传入(I18n 不进本类);纯 BCL、双时钟注入 → 可离线单测(tests/)。
+// 呈现为 push 模型:每个事件发布一份完整 LoadingViewState(全程 + 当前阶段
+// 双进度)给 Presenter,Present 调用密度 = 真实加载活动密度。
+// 文案由钩子解析后传入(I18n 不进本类);纯 BCL、双时钟注入,可离线单测(tests/)。
 
 /// <summary>启动路标。</summary>
 internal enum BootWaypoint { Logo, MenuLoad, MainMenu }
@@ -46,9 +46,9 @@ internal sealed class BootTimeline
     /// 启动期的会话名 → 阶段 + 全程条子区间。游戏内会话(房间/角色)不在此表,自动忽略。
     /// 注意没有 "MainMenu" 会话:游戏唯一创建它的 PreloadManager.LoadMainMenuAssets 零调用者,
     /// 菜单资产实际由 "Common" 会话加载(LoadCommonAndMainMenuAssets),但那发生在
-    /// ExecuteDeferred(=条的 1.0 完成点与 Freeze 点)之后、条 2 秒弥留期内——若映射它,
-    /// 会把已显示 1.0「完成」的条拽回 0.88。启动边界定在菜单就绪,延迟资产
-    /// 属启动后后台工作,不进条也不进冻结的 Api 数据。
+    /// ExecuteDeferred(=条的 1.0 完成点与 Freeze 点)之后、条移除前的 2 秒停留期内——
+    /// 若映射它,会把已显示 1.0「完成」的条拽回 0.88。启动边界定在菜单就绪,延迟资产
+    /// 属启动后的后台工作,不进条也不进冻结的 Api 数据。
     /// </summary>
     private static readonly Dictionary<string, (BootStage Stage, float Start, float End)> SessionRanges = new()
     {
@@ -65,7 +65,7 @@ internal sealed class BootTimeline
 
     // ---- 状态(主线程独占写入) ----
 
-    /// <summary>呈现回调(推模型):主题只消费完整快照。</summary>
+    /// <summary>呈现回调(push 模型):主题只消费完整快照。</summary>
     public Action<LoadingViewState>? Presenter;
 
     private readonly Func<long> _engineMsec;
@@ -109,7 +109,7 @@ internal sealed class BootTimeline
     {
         _engineMsec = engineMsec;
         _swTicks = swTicks;
-        // 时钟对表(必须先于任何钩子的 ToEngineMs)
+        // 记录双时钟偏移(必须先于任何钩子的 ToEngineMs)
         _engineOffsetMs = engineMsec() - swTicks() * SwTicksToMs;
     }
 
@@ -136,7 +136,7 @@ internal sealed class BootTimeline
 
     /// <summary>
     /// 纯日志事件:只更新细节文案,不推进任何进度(overall/local 原样)、不记 span、
-    /// 不强制出帧。给「mod 加载内部子步骤」(初始化器/资源包挂载)等 finer 粒度用。
+    /// 不强制出帧。给「mod 加载内部子步骤」(初始化器/资源包挂载)等更细粒度用。
     /// </summary>
     internal void Activity(string text)
     {
@@ -145,7 +145,7 @@ internal sealed class BootTimeline
         Presenter?.Invoke(_current);
     }
 
-    // ---- 写缝:钩子报事实 ----
+    // ---- 写入口:钩子上报事实 ----
 
     /// <summary>mod 段开始。processed 含本 mod 与本次启动中已经先于它处理的 mod。</summary>
     internal void BeginMods(int total, int processed, string stepText)
@@ -171,7 +171,7 @@ internal sealed class BootTimeline
     }
 
     /// <summary>
-    /// 工坊扫描时序(gd 轮询观测,Handoff 时一次性上交):每项一条 Prelude span,
+    /// 工坊扫描时序(gd 轮询观测,Handoff 时一次性导入):每项一条 Prelude span,
     /// 相邻观测差分 ≈ 单项耗时(含 Steam 异步查询;0.1s 轮询量化)。
     /// startMsec 为 gd 引擎毫秒(与 ToEngineMs 同一时间轴,可直接作 StartMs)。
     /// endMs ≤ 0 表示 gd 未观测到结束标记,以当前引擎时刻兜底。不推进进度条。
@@ -354,7 +354,7 @@ internal sealed class BootTimeline
         }
     }
 
-    /// <summary>主菜单已显示(ExecuteDeferred 语义):收尾末步骤 span、TotalBootMs(含首启兜底)、冻结、呈现 1.0。</summary>
+    /// <summary>主菜单已显示(ExecuteDeferred 语义):收尾末步骤 span、TotalBootMs(含首次启动兜底)、冻结、呈现 1.0。</summary>
     internal void MenuReady(string doneText, string detail)
     {
         if (Frozen) return;
@@ -366,7 +366,7 @@ internal sealed class BootTimeline
         }
         else
         {
-            // 首启兜底:注入发生在 mod 加载期、autoload 已解析完,gd 节点
+            // 首次启动兜底:注入发生在 mod 加载期、autoload 已解析完,gd 节点
             // 不存在 → 锚点=-1。兜底用 0 锚点:TotalBootMs=引擎至今总时长;span 的
             // StartMs 本就是绝对引擎毫秒,÷total 的分数定位自然正确(prelude 段无数据)。
             _totalBootMs = _engineMsec();

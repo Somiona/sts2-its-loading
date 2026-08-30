@@ -40,9 +40,9 @@ namespace ItsLoading.Api
             Snapshot(T?.ModSpans, ref _frozenMods);
 
         /// <summary>
-        /// 工坊扫描逐项耗时(Id = "workshop 工坊项id",Detail = mod 显示名)。
+        /// 工坊扫描逐项耗时(Id = "workshop 工坊项 id",Detail = mod 显示名)。
         /// gd 在帧 0 起轮询日志观测,相邻观测差分 ≈ 单项耗时(0.1s 量化,含 Steam 查询);
-        /// 首启(脚本未就绪)或扫描早于 gd 观测时本表为空。
+        /// 首次安装启动(脚本未就绪)或扫描早于 gd 观测时本表为空。
         /// </summary>
         public static IReadOnlyList<LoadSpan> WorkshopItems =>
             Snapshot(T?.WorkshopSpans, ref _frozenWorkshop);
