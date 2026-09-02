@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "space": { "kind": "design", "w": 854, "h": 480 },
+  "elements": [
+    { "id": "bg", "type": "bg", "color": "#ffffffff" },
+    { "id": "logo", "type": "logo", "src": "gachathespire_logo.png",
+      "x": 167, "y": 56, "w": 520,
+      "fallback_text": "SLAY THE SPIRE 2", "fallback_font": 28,
+      "fallback_color": "#595959ff", "nearest": false },
+    { "id": "row2", "type": "icon_row",
+      "count": 7, "size": 37.4, "gap": 12, "cx": 427, "cy": 366,
+      "pattern": "gachathespire_%d.png", "index_base": 8,
+      "nearest": false, "placeholder": "#808080ff" },
+    { "id": "dots", "type": "dots", "of": "row2",
+      "scale": 0.2, "color": "#808080ff", "cy": 366 },
+    { "id": "mask", "type": "mask_track", "members": ["row2", "dots"],
+      "tint": "#808080ff", "bind": "local",
+      "indeterminate": { "mode": "slide", "cycle_s": 3.0 } },
+    { "id": "row1", "type": "icon_row",
+      "count": 7, "size": 44, "gap": 20, "cx": 427, "bottom": 330, "pivot": "bottom",
+      "pattern": "gachathespire_%d.png", "index_base": 1,
+      "nearest": false, "placeholder": "#808080ff",
+      "enlarge": { "factor": 1.2 } },
+    { "id": "log", "type": "log_rows", "bind": "log",
+      "x": 24, "y": 414, "w": 806, "lines": 3, "per_line": 5, "sep": " | ",
+      "line_h": 12, "font": 8.4, "color": "#808080ff" },
+    { "id": "version", "type": "version_label", "prefix": "It's Loading v",
+      "x": 24, "y": 24, "font": 7.5, "color": "#d9d9d9ff" }
+  ]
+}

@@ -28,11 +28,9 @@ REQUIRED_SETTINGS_KEYS = [
     "ITSLOADING-mod_title",
     "ITSLOADING-OPEN_WATERFALL.title",
     "ITSLOADING-VIEW.title",
-    "ITSLOADING-THEME.title",
-    # 下拉框枚举项(ITSLOADING-THEME.<枚举名>,缺键回退枚举原名);新增主题时同增
-    "ITSLOADING-THEME.Classic",
-    "ITSLOADING-THEME.Minespire",
-    "ITSLOADING-THEME.GachaTheSpire",
+    "ITSLOADING-NATIVE_RENDERER.title",
+    "ITSLOADING-CALIB_VIEW.title",
+    "ITSLOADING-OPEN_GALLERY.title",
 ]
 
 
@@ -41,12 +39,19 @@ def used_keys():
     keys = set()
     pat_cs = re.compile(r'I18n\.T\(\s*"([^"]+)"')
     pat_gd = re.compile(r'\b_txt\(\s*"([^"]+)"')
+    pat_json_loc = re.compile(r'"loc"\s*:\s*"([^"]+)"')
     for f in SRC.rglob("*.cs"):
         if "bin" in f.parts or "obj" in f.parts:
             continue
         text = f.read_text(encoding="utf-8")
         keys |= set(pat_cs.findall(text))
+    # gd 侧 _txt("...")(boot.gd/interpreter.gd;此前只扫 .cs 是既有缺口)
+    for f in SRC.rglob("*.gd"):
+        text = f.read_text(encoding="utf-8")
         keys |= set(pat_gd.findall(text))
+    # 声明式主题的 loc 引用:{"text": {"loc": "bar.starting"}}
+    for f in (SRC / "themes").rglob("theme.json"):
+        keys |= set(pat_json_loc.findall(f.read_text(encoding="utf-8")))
     return keys
 
 

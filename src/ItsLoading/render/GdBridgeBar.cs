@@ -17,7 +17,7 @@ namespace ItsLoading;
 //      takeover 掉旧节点,从磁盘以 CACHE_MODE_IGNORE 实例化本次启动刚刷新的
 //      boot.gd,attach 新实例。三种情况主题显示都不受影响。
 //
-// 协议(与 Themes/boot.gd 成对,破坏性变更双侧同步升版本):
+// 协议(与 render/boot.gd 成对,破坏性变更双侧同步升版本):
 //   csharp_attach() / csharp_present(overall, local, stage, step, detail) /
 //   takeover() / show_hint(text) —— 桥接后调用
 //   bridge_version(实例变量,Get 读取)—— 精确版本协商
@@ -25,7 +25,7 @@ namespace ItsLoading;
 // 移除:本类拥有所宿节点 —— Retire 直接对它调 takeover()(淡出或立即隐藏由 gd 决定)。
 internal sealed class GdBridgeBar : ILoadingTheme
 {
-    internal const int BridgeVersion = 9;
+    internal const int BridgeVersion = 11;
 
     private readonly Godot.Node _node;
     private readonly bool _lateHosted;
@@ -150,16 +150,32 @@ internal sealed class GdBridgeBar : ILoadingTheme
             : "[ItsLoading] persistent gd boot view attached");
     }
 
-    /// <summary>转发 BootTimeline.Present 到 gd 节点;forceDraw 时在 C# 侧配对强制出帧。</summary>
-    public void Present(LoadingViewState state)
+    private int _lastLogCount = -1;
+    private string _lastLogTail = "";
+
+    /// <summary>
+    /// 转发共用视图模型到 gd 节点(v11):StepText 已含阶段包装,日志发全量流
+    /// (含前奏行)。日志变更检测(计数+尾行)避免逐帧 marshal 60 条字符串;
+    /// 空数组 = 未变,gd 侧沿用上次。forceDraw 时在 C# 侧配对强制出帧。
+    /// </summary>
+    public void Present(LoadingViewState state, PresentedSnapshot snap)
     {
         if (_dead || !GodotObject.IsInstanceValid(_node)) return;
         _presents++;
         ItsLoading.Run("bridge present", () =>
         {
+            var log = new Godot.Collections.Array<string>();
+            bool changed = snap.Log.Count != _lastLogCount
+                || (snap.Log.Count > 0 && snap.Log[^1] != _lastLogTail);
+            if (changed)
+            {
+                foreach (var line in snap.Log) log.Add(line);
+                _lastLogCount = snap.Log.Count;
+                _lastLogTail = snap.Log.Count > 0 ? snap.Log[^1] : "";
+            }
             _node.Call("csharp_present",
                 state.Overall, state.Local, (int)state.Stage,
-                state.Step ?? "", state.Detail ?? "");
+                snap.StepText, snap.DetailText, log);
             if (state.ForceDraw) RenderingServer.ForceDraw();
         });
     }
@@ -172,6 +188,7 @@ internal sealed class GdBridgeBar : ILoadingTheme
     /// </summary>
     public void Retire()
     {
+        if (_dead) return; // 原生接管时已退过一次(onAttach),RetireBar 的二次调用幂等
         _dead = true;
         ItsLoading.Run("dismiss boot view", () => _node.Call("takeover"));
         string theme = _node.Get("_theme_id").AsString();

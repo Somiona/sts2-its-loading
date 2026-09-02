@@ -80,11 +80,17 @@ This mod shows a progress bar during game startup, telling you **what is actuall
 
 ## Themes
 
-Three loading themes, selectable via a dropdown in the mod settings (applies from the next launch):
+Pick a theme in the in-game **Theme gallery** (mod settings → *Theme gallery*): a list of everything installed with a live animated preview on the right; **Apply** takes effect from the next launch.
+
+Three themes ship with the mod:
 
 - **Classic**: the bottom dual-bar strip with the activity log
 - **Minespire**: a full-screen red centered layout — labels above each bar, the activity log moved to the bottom-left corner, a pixel-style game logo on top, and a little running fox in the bottom-right — a Minecraft-style boot screen, gently fading out when the boot completes
 - **GachaTheSpire**: a full-screen white centered layout where two rows of emblem icons act as the progress bar — the top row marks the overall boot (current stage enlarged), while a gray mask sweeps over the denser second row as the in-stage progress advances; a three-line activity log sits centered at the bottom — a gacha-game-style boot screen, gently fading out when the boot completes
+
+### Making your own theme
+
+A theme is **pure data** — a `theme.json` plus assets, shipped as an ordinary mod ("theme pack"). The same file drives the boot splash, the macOS freeze-phase native renderer, and the gallery preview; there is no code and nothing to compile. Copy [`pack-template/`](pack-template/) to start, validate with `python3 tools/check_themes.py <theme dir>`, and see [docs/theme-authoring.md](docs/theme-authoring.md) for the full vocabulary.
 
 ## Install
 

@@ -224,6 +224,7 @@ internal static class BootPhasePatches
 
     private static void BeforeLogoPlay()
     {
+        FreezeProbe.Sample("logo-play");
         ItsLoading.Timeline.Waypoint(BootWaypoint.Logo, I18n.T("bar.logo"), "");
     }
 
@@ -248,6 +249,7 @@ internal static class BootPhasePatches
     /// <summary>主菜单已显示(ExecuteDeferred 语义):时间线收尾/冻结/呈现 1.0,本层管注册、摘要与移除。</summary>
     private static void BeforeDeferred()
     {
+        FreezeProbe.Sample("menu-ready");
         ItsLoading.Timeline.MenuReady(I18n.T("bar.done"), $"{ItsLoading.Sw.ElapsedMilliseconds}ms");
 
         // 首次启动的兜底注册:见 WaterfallViewer.RegisterInBaseLib 的注释

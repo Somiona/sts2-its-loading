@@ -7,6 +7,17 @@ changenote 随版本号发出,上传成功后自动把该区改标为发布的�
 
 ## Unreleased
 
+- 任何人都能做主题啦:一份 theme.json 纯数据就是一个主题包,以普通 mod 的形式发布;启动画面、冻结期原生渲染与画廊预览共用同一份声明,零代码零编译喵
+  - Anyone can make a theme now: one pure-data theme.json shipped as an ordinary mod ("theme pack") drives the boot splash, the freeze-phase native renderer, and the gallery preview from the same declaration — no code, no compiling nya
+- 设置里新增主题画廊:列出全部已装主题并实时预览,点 Apply 下次启动生效,原来的下拉框退役喵
+  - A theme gallery has arrived in the settings: it lists every installed theme with a live animated preview; Apply takes effect from the next launch — the old dropdown is retired nya
+- 测试版(beta)分支的冻结期现在由原生渲染直接画完整主题画面:进度条、日志、精灵全部实时更新,直到主菜单淡出喵(设置里「(Beta) Native loading screen renderer」可关)
+  - On the public-beta branch, the frozen phase is now drawn natively with the full themed screen — bars, logs and sprites all update live, fading out at the main menu nya (toggle "(Beta) Native loading screen renderer" in the settings to turn it off)
+- 主题视觉收敛为单一来源:文案包装、活动日志(含工坊扫描前奏)、不定进度时钟在两个渲染器间逐字节一致;新增开发者标定视图供布局比对喵
+  - Theme visuals now have a single source of truth: text wrapping, the activity log (including the workshop-scan prelude) and the indeterminate clock are byte-identical across both renderers; a developer calibration view is available for layout comparison nya
+
+## [v0.19.0] — 2026-09-01
+
 - 测试版(beta)分支现在也能完整显示启动画面的活动日志了喵～
   - The beta branch now shows the boot screen's activity log in full as well nya
 - 瀑布图改成了分层视图,模组和内部步骤想看多细就展开多细,还有一键全部展开喵

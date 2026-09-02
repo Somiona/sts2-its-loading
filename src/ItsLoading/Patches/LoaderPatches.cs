@@ -67,6 +67,7 @@ internal static class LoaderPatches
                      $"gen2={GC.CollectionCount(2) - _lastG2})");
         }
         string id = mod.manifest?.id ?? "<null>";
+        FreezeProbe.Sample("mod:" + id);
         // 在真正进入昂贵初始化前提交“正在加载哪个 mod”;该状态会自然停留整个加载时长。
         ItsLoading.Timeline.ModStarted(
             I18n.T("bar.mods", new()
@@ -117,6 +118,7 @@ internal static class LoaderPatches
 
     private static void BeforeInitializer(Type initializerType)
     {
+        FreezeProbe.Sample("pre-init:" + initializerType.Name);
         _initStartTicks = ItsLoading.Sw.ElapsedTicks;
         ItsLoading.Timeline?.Activity(
             I18n.T("bar.initializing", new() { ["type"] = initializerType.Name }));
@@ -124,6 +126,7 @@ internal static class LoaderPatches
 
     private static void AfterInitializer(Type initializerType)
     {
+        FreezeProbe.Sample("post-init:" + initializerType.Name);
         long end = ItsLoading.Sw.ElapsedTicks;
         long ms = (long)((end - _initStartTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
         ItsLoading.Timeline?.ModSubStep("init " + initializerType.Name, _initStartTicks, end);

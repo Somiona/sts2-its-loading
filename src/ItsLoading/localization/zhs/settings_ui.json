@@ -1,9 +1,8 @@
 {
   "ITSLOADING-mod_title": "不再干等",
   "ITSLOADING-OPEN_WATERFALL.title": "启动瀑布图",
+  "ITSLOADING-OPEN_GALLERY.title": "主题画廊",
   "ITSLOADING-VIEW.title": "查看",
-  "ITSLOADING-THEME.title": "加载主题(下次启动生效)",
-  "ITSLOADING-THEME.Classic": "经典",
-  "ITSLOADING-THEME.Minespire": "Minespire",
-  "ITSLOADING-THEME.GachaTheSpire": "GachaTheSpire"
+  "ITSLOADING-NATIVE_RENDERER.title": "(Beta) 原生加载画面渲染器",
+  "ITSLOADING-CALIB_VIEW.title": "(Debug) 开发者标定视图"
 }

@@ -12,24 +12,46 @@
 # 失败:打印 GEOM FAIL 并 OS.set_exit_code(1)
 extends MainLoop
 
-const THEMES_DIR := "res://src/ItsLoading/Themes"
+const RENDER_DIR := "res://src/ItsLoading/render"
+const THEMES_DIR := "res://src/ItsLoading/themes"
 const VIEWPORT := Vector2(1733.0, 975.0)  # 与实机同量级,暴露缩放类问题
 
 var _fails := 0
 
 
 func _initialize() -> void:
-	var kit: GDScript = load(THEMES_DIR + "/kit.gd")
+	var kit: GDScript = load(RENDER_DIR + "/kit.gd")
 
 	_check_bare_bars(kit)
-	for theme in ["classic", "minespire", "gachathespire"]:
+	var names := _theme_names()
+	if names.is_empty():
+		_fail("主题目录没有 theme.json:" + THEMES_DIR)
+	for theme in names:
 		_check_theme(kit, theme)
 
 	if _fails == 0:
-		print("  几何不变量(kit 裸控件 + 3 主题矩阵): 通过")
+		print("  几何不变量(kit 裸控件 + %d 主题矩阵): 通过" % names.size())
 	else:
 		push_error("GEOM FAIL: %d 处不变量被破坏" % _fails)
 		OS.set_exit_code(1)
+
+
+# 主题目录扫描(新增主题 = 建 themes/<id>/theme.json,无需改本文件)
+func _theme_names() -> Array[String]:
+	var out: Array[String] = []
+	var d := DirAccess.open(THEMES_DIR)
+	if d == null:
+		return out
+	d.list_dir_begin()
+	var n := d.get_next()
+	while n != "":
+		if d.current_is_dir() and not n.begins_with(".") \
+				and FileAccess.file_exists(THEMES_DIR + "/" + n + "/theme.json"):
+			out.append(n)
+		n = d.get_next()
+	d.list_dir_end()
+	out.sort()
+	return out
 
 
 func _process(_delta: float) -> bool:
@@ -85,14 +107,20 @@ func _check_bare_bars(kit: GDScript) -> void:
 
 # ---------------------------------------------------------------- 整主题矩阵
 
+# 主题装载:theme.json(声明式)—— 与 boot.gd 同一装载语义,经 interpreter.gd
+func _load_theme_script(id: String) -> GDScript:
+	return load(RENDER_DIR + "/interpreter.gd")
+
+
 func _check_theme(kit: GDScript, id: String) -> void:
-	var theme_script: GDScript = load(THEMES_DIR + "/" + id + "/theme.gd")
+	var theme_script: GDScript = _load_theme_script(id)
 	var theme = theme_script.new()
 	var root := Control.new()
 	theme.theme_build({
 		"root": root, "viewport": VIEWPORT, "mod_dir": "",
 		"txt": Callable(self, "_txt"), "kit": kit.new(""),
 		"theme_id": id, "mod_version": "check",
+		"theme_dir": THEMES_DIR + "/" + id,
 	})
 
 	# 矩阵:不定(t 各相位)→ 可测(各分数)交替 + 换阶段,每步后查全树条几何
@@ -114,8 +142,12 @@ func _check_theme(kit: GDScript, id: String) -> void:
 			})
 			_check_fill_containment(root, "%s stage%d snap%d" % [id, stage, i])
 
-	if id == "gachathespire":
-		_check_gacha(theme)
+	# 声明式主题特有(经 inspect() 观测面):行标记唯一且矩形不变、蒙版段在轨分数域
+	var el: Dictionary = theme.inspect()
+	for row_id in el["enlarge"]:
+		_check_row_markers(str(row_id), el["rows"][row_id], el["geoms"][row_id])
+	if el["mask"] != null:
+		_check_mask_domain(el["mask"])
 	theme.theme_retire()  # 冒烟:retire 后 apply 静默
 	theme.theme_apply({"overall": 1.0, "local": 1.0, "indeterminate": false,
 		"t": 0.0, "stage": 7, "stage_changed": false, "step": "", "detail": "",
@@ -133,11 +165,12 @@ func _check_fill_containment(node: Node, where: String) -> void:
 		_check_fill_containment(c, where)
 
 
-# gachathespire 特有:放大标记唯一、底边不动(矩形终身不变);蒙版段在轨分数域。
-func _check_gacha(theme) -> void:
-	var row: Array = theme.get("_row1")
-	if row.size() != 7:
-		_fail("gachathespire 第一排控件数 %d ≠ 7" % row.size())
+# 行标记不变量(绑定 stage 放大的 icon_row):控件数 = 声明 count、放大标记唯一、
+# 底边不动(矩形终身不变)。
+func _check_row_markers(row_id: String, row: Array, geom: Dictionary) -> void:
+	if row.size() != int(geom.count):
+		_fail("%s 行控件数 %d ≠ 声明 count %d" % [row_id, row.size(), int(geom.count)])
+		return
 	var enlarged := 0
 	var bottom: float = row[0].position.y + row[0].size.y
 	for i in row.size():
@@ -145,18 +178,21 @@ func _check_gacha(theme) -> void:
 			enlarged += 1
 		# 矩形终身不变:底边(= 不动点)构建后不应被动过 —— 与构建值一致
 		if absf(row[i].position.y + row[i].size.y - bottom) > 0.01:
-			_fail("gachathespire 第一排底缘不一致(矩形被动过): %d" % i)
+			_fail("%s 行底缘不一致(矩形被动过): %d" % [row_id, i])
 	if enlarged != 1:
-		_fail("gachathespire 放大标记数 %d ≠ 1" % enlarged)
-	var mask = theme.get("_mask")
+		_fail("%s 行放大标记数 %d ≠ 1" % [row_id, enlarged])
+
+
+# 蒙版段不变量:段参数在轨分数域 [0, 1] 内。
+func _check_mask_domain(mask) -> void:
 	var mats: Array = mask.get("_mats")
 	if mats.is_empty():
-		_fail("gachathespire 蒙版材质为空")
+		_fail("蒙版材质为空")
 		return
 	var seg_a: float = mats[0].get_shader_parameter("seg_a")
 	var seg_b: float = mats[0].get_shader_parameter("seg_b")
 	if seg_a < -0.01 or seg_b > 1.01 or seg_b < seg_a - 0.01:
-		_fail("gachathespire 蒙版段 [%s, %s] 越出轨分数域 [0, 1]" % [seg_a, seg_b])
+		_fail("蒙版段 [%s, %s] 越出轨分数域 [0, 1]" % [seg_a, seg_b])
 
 
 func _txt(key: String) -> String:

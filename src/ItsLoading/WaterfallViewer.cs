@@ -95,11 +95,20 @@ public static class WaterfallViewer
     {
         public static void OpenWaterfall() => Show();
 
-        /// <summary>BaseLib 设置页下拉框的静态属性透传:getter 直读 cfg 文件。</summary>
-        public static LoadingTheme GetTheme() => ThemeRegistry.Current();
+        /// <summary>主题画廊(BaseLib 入口):列出全部已发现主题,实时预览,应用即写 cfg。</summary>
+        public static void OpenGallery() => ThemeGallery.Show();
 
-        /// <summary>下拉框选中:setter 同步写 cfg(见 ThemeRegistry.TrySet)。</summary>
-        public static void SetTheme(LoadingTheme theme) => ThemeRegistry.TrySet(theme);
+        /// <summary>(Beta)原生加载屏渲染器开关:getter 直读 cfg(缺省=开)。</summary>
+        public static bool GetNativeRenderer() => ThemeRegistry.NativeRendererEnabled();
+
+        /// <summary>开关切换:setter 同步写 cfg(见 ThemeRegistry.TrySetNativeRenderer)。</summary>
+        public static void SetNativeRenderer(bool on) => ThemeRegistry.TrySetNativeRenderer(on);
+
+        /// <summary>(Debug)开发者标定视图:getter 直读 cfg(缺省=关)。</summary>
+        public static bool GetCalibView() => ThemeRegistry.CalibViewEnabled();
+
+        /// <summary>标定视图切换:setter 同步写 cfg。</summary>
+        public static void SetCalibView(bool on) => ThemeRegistry.TrySetCalibView(on);
     }
 
     private static void Show()

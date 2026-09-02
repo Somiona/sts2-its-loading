@@ -27,6 +27,9 @@ python3 tools/check_i18n.py
 # (C# 测试覆盖不到 gd 文本)
 python3 tools/check_gd_template.py
 
+# theme.json 词汇表门禁(声明式主题的闭环校验;亦可独立给主题作者用)
+python3 tools/check_themes.py
+
 # 时间线数学回归(纯 BCL,离线跑;本机仅 .NET 10 运行时,故测试工程 target net10.0)
 dotnet test tests/ItsLoadingTimeline.Tests/ItsLoadingTimeline.Tests.csproj -c Release
 

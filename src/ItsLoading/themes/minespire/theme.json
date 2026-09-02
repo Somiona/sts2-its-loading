@@ -1,0 +1,33 @@
+{
+  "format": 1,
+  "space": { "kind": "design", "w": 854, "h": 480 },
+  "elements": [
+    { "id": "bg", "type": "bg", "color": "#ef323dff" },
+    { "id": "logo", "type": "logo", "src": "mc_style_sts2_logo.png",
+      "x": 167, "y": 96, "w": 520,
+      "fallback_text": "SLAY THE SPIRE 2", "fallback_font": 28,
+      "fallback_color": "#ffffffff", "nearest": true },
+    { "id": "step", "type": "label", "bind": "step",
+      "text": { "loc": "bar.starting" }, "x": 227, "y": 250,
+      "font": 20, "color": "#ffffffff" },
+    { "id": "overall", "type": "bar_outline", "bind": "overall",
+      "x": 227, "y": 280, "w": 400, "h": 20, "border_w": 2, "inset": 4,
+      "border": "#ffffffff", "fill": "#ffffffbf" },
+    { "id": "detail", "type": "label", "bind": "detail",
+      "text": "engine boot", "x": 227, "y": 305,
+      "font": 14, "color": "#ffffffcc" },
+    { "id": "local", "type": "bar_outline", "bind": "local",
+      "x": 227, "y": 328, "w": 400, "h": 20, "border_w": 2, "inset": 4,
+      "border": "#ffffffff", "fill": "#ffffffff",
+      "indeterminate": { "mode": "slide", "cycle_s": 3.0 } },
+    { "id": "log", "type": "log_column", "bind": "log",
+      "x": 10, "y": 300, "lines": 10, "line_h": 17, "font": 10,
+      "color": "#ffffffff" },
+    { "id": "fox", "type": "sprite", "src": "fox_running.png",
+      "x": 693, "y": 322, "w": 151, "h": 128,
+      "frame_w": 151, "frame_h": 128, "frames": 28, "fps": 12, "nearest": true },
+    { "id": "version", "type": "version_label", "prefix": "It's Loading v",
+      "x": 544, "y": 454, "w": 300, "h": 16, "font": 12,
+      "color": "#ffffffcc", "align": 2 }
+  ]
+}

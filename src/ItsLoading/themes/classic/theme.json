@@ -1,0 +1,23 @@
+{
+  "format": 1,
+  "space": { "kind": "screen" },
+  "elements": [
+    { "id": "strip",  "type": "strip", "h": 76 },
+    { "id": "step",    "type": "label", "parent": "strip", "bind": "step",
+      "text": { "loc": "bar.starting" }, "x": 24, "y": 6,
+      "font": 20, "color": "#ffffffff" },
+    { "id": "detail",  "type": "label", "parent": "strip", "bind": "detail",
+      "text": "engine boot", "x": 24, "y": 31,
+      "font": 14, "color": "#9ea3b3ff" },
+    { "id": "overall", "type": "bar_solid", "parent": "strip", "bind": "overall",
+      "x": 24, "y": 55, "w": "fill", "h": 3,
+      "track": "#ffffff26", "fill": "#33d9e68c" },
+    { "id": "local",   "type": "bar_solid", "parent": "strip", "bind": "local",
+      "x": 24, "y": 66, "w": "fill", "h": 5,
+      "track": "#ffffff26", "fill": "#33d9e6ff",
+      "indeterminate": { "mode": "pulse", "min_w": 60, "travel": 160 } },
+    { "id": "log",     "type": "log_column", "parent": "strip", "bind": "log",
+      "x": 24, "y": -174, "lines": 10, "line_h": 17, "font": 12,
+      "color": "#9ea3b3ff" }
+  ]
+}

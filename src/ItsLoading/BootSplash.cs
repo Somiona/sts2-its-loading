@@ -10,15 +10,18 @@ namespace ItsLoading;
 
 // ---------------------------------------------------------------- 启动画面(boot.gd)自注入
 //
-// 帧 0 起效的 gd bootstrap:主题视觉全部在 mod 目录的 .gd 文件里
-// (仓库 src/ItsLoading/Themes/ → 发行 mods/ItsLoading/gd/),C# 不内嵌
-// GDScript。Install 负责同步:
-//   · gd 树按字节差异刷新到 user://itsloading/(引擎只认 res://、user:// 资源路径)
-//   · override.cfg 的 autoload 指向 user://itsloading/boot.gd(旧路径条目改写)
-//   · 删除旧版单文件脚本 user://loadingbar_boot.gd
+// 帧 0 起效的 gd bootstrap:主题视觉全部在 mod 目录的 gd/json 文件里
+// (仓库 src/ItsLoading/{render,themes} → 发行 mods/ItsLoading/{render,themes},
+// render 发行只带 *.gd —— C# 编译进 dll,不随数据发行),C# 不内嵌 GDScript。
+// Install 负责同步:
+//   · render/ 与 themes/ 两棵树按字节差异刷新到 user://itsloading/
+//     (引擎只认 res://、user:// 资源路径)
+//   · override.cfg 的 autoload 指向 user://itsloading/render/boot.gd
+//     (旧路径条目改写)
+//   · 清掉旧版平铺布局(user://itsloading 根下的 boot.gd/<id>/)与单文件脚本
 // 时序:帧 0 用上一次启动留下的拷贝,本次启动的 Init 再刷新;GdBridgeBar
 // 晚期托管以 CACHE_MODE_IGNORE 读盘,拿到的就是刚刷新的新拷贝。
-// 安装与锚点交接集中在本类;协议与主题装载见 Themes/boot.gd。
+// 安装与锚点交接集中在本类;协议与主题装载见 render/boot.gd。
 
 internal static class BootSplash
 {
@@ -26,7 +29,7 @@ internal static class BootSplash
     private const string GdUserDir = "user://itsloading";
 
     /// <summary>bootstrap 脚本的 user:// 路径(GdBridgeBar 晚期托管装载点)。</summary>
-    internal const string BootGdUserPath = GdUserDir + "/boot.gd";
+    internal const string BootGdUserPath = GdUserDir + "/render/boot.gd";
 
     private const string CfgMarker = "; LoadingBar mod autoload";
 
@@ -45,11 +48,17 @@ internal static class BootSplash
     {
         string exeDir = Path.GetDirectoryName(OS.GetExecutablePath()) ?? ".";
         string cfgPath = Path.Combine(exeDir, "override.cfg");
-        string srcDir = Path.Combine(
-            Path.GetDirectoryName(typeof(ItsLoading).Assembly.Location) ?? ".", "gd");
+        // mod 根下的两个镜像源:render/(gd 引导层,发行只带 *.gd)与 themes/(纯数据)
+        string modRoot = Path.GetDirectoryName(typeof(ItsLoading).Assembly.Location) ?? ".";
 
         bool gdOk;
-        try { gdOk = RefreshGdTree(srcDir); }
+        try
+        {
+            // 非短路 &:三步都要跑完,再汇总结果
+            gdOk = RefreshTree(Path.Combine(modRoot, "render"), "render")
+                & RefreshTree(Path.Combine(modRoot, "themes"), "themes")
+                & RemoveLegacyLayout();
+        }
         catch (Exception e)
         {
             Log.Error($"[ItsLoading] FAILED to refresh gd tree: {e}");
@@ -80,17 +89,18 @@ internal static class BootSplash
     }
 
     /// <summary>
-    /// gd 树镜像同步:字节一致跳过,不同覆盖,目标侧多余文件删除(源侧已改名/
-    /// 删除的主题文件不在 user:// 残留)。返回"是否完全一致"(驱动 InjectedThisRun)。
+    /// 树镜像同步(mod 根的 render/ 或 themes/ → user://itsloading/&lt;sub&gt;/):
+    /// 字节一致跳过,不同覆盖,目标侧多余文件删除(源侧已改名/删除的主题文件
+    /// 不在 user:// 残留)。返回"是否完全一致"(驱动 InjectedThisRun)。
     /// </summary>
-    private static bool RefreshGdTree(string srcDir)
+    private static bool RefreshTree(string srcDir, string sub)
     {
         if (!Directory.Exists(srcDir))
         {
             Log.Error($"[ItsLoading] gd source dir missing: {srcDir}");
             return false;
         }
-        string dstDir = ProjectSettings.GlobalizePath(GdUserDir);
+        string dstDir = Path.Combine(ProjectSettings.GlobalizePath(GdUserDir), sub);
         Directory.CreateDirectory(dstDir);
         bool allSame = true;
 
@@ -105,7 +115,7 @@ internal static class BootSplash
             Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
             File.Copy(src, dst, overwrite: true);
             allSame = false;
-            Log.Warn($"[ItsLoading] refreshed {GdUserDir}/{rel.Replace('\\', '/')}");
+            Log.Warn($"[ItsLoading] refreshed {GdUserDir}/{sub}/{rel.Replace('\\', '/')}");
         }
 
         if (Directory.Exists(dstDir))
@@ -114,12 +124,44 @@ internal static class BootSplash
             {
                 string rel = Path.GetRelativePath(dstDir, dst);
                 if (File.Exists(Path.Combine(srcDir, rel))) continue;
+                // 生成态文件不属镜像内容:主题包缓存(ThemePacks 每次启动重写,
+                // gd 帧 0 读)不能被清扫删掉
+                if (sub == "render" && rel == "theme-map.json") continue;
                 File.Delete(dst);
                 allSame = false;
-                Log.Warn($"[ItsLoading] removed stale {GdUserDir}/{rel.Replace('\\', '/')}");
+                Log.Warn($"[ItsLoading] removed stale {GdUserDir}/{sub}/{rel.Replace('\\', '/')}");
             }
         }
         return allSame;
+    }
+
+    /// <summary>
+    /// 清掉 v0.20 之前的平铺布局:user://itsloading 根下只允许 render/ 与
+    /// themes/ 存在,旧版根级 boot.gd/kit.gd/&lt;主题id&gt;/ 整体删除
+    /// (运行中的旧脚本已在内存,删文件无害)。有删除 = 不算"完全一致"。
+    /// </summary>
+    private static bool RemoveLegacyLayout()
+    {
+        string root = ProjectSettings.GlobalizePath(GdUserDir);
+        if (!Directory.Exists(root)) return true;
+        bool clean = true;
+        foreach (string entry in Directory.EnumerateFileSystemEntries(root))
+        {
+            string name = Path.GetFileName(entry);
+            if (name == "render" || name == "themes") continue;
+            try
+            {
+                if (Directory.Exists(entry)) Directory.Delete(entry, recursive: true);
+                else File.Delete(entry);
+                clean = false;
+                Log.Warn($"[ItsLoading] removed legacy layout entry {GdUserDir}/{name}");
+            }
+            catch (Exception e)
+            {
+                Log.Warn($"[ItsLoading] legacy cleanup skipped {name}: {e.Message}");
+            }
+        }
+        return clean;
     }
 
     /// <summary>
@@ -199,7 +241,8 @@ internal static class BootSplash
             {
                 ItsLoading.Timeline?.SetBootAnchor(anchor.AsInt64());
             }
-            // 工坊扫描时序(gd 轮询观测)转成逐项 Prelude span;
+            // 工坊扫描时序 + 前奏活动行(gd 轮询观测)转成逐项 Prelude span,
+            // 并灌入共用日志环(LoadingPresentation.SeedLog 前插,与时机无关);
             // 旧脚本没有 get_workshop_log,缺席则跳过。
             if (boot.HasMethod("get_workshop_log"))
             {
@@ -212,6 +255,17 @@ internal static class BootSplash
                     double endMs = arr[0].AsDouble();
                     var names = arr.Count > 2 && arr[2].VariantType == Variant.Type.Dictionary
                         ? arr[2].AsGodotDictionary() : null;
+                    if (arr.Count > 3 && arr[3].VariantType == Variant.Type.Array)
+                    {
+                        var prelude = new List<string>();
+                        foreach (Variant line in arr[3].AsGodotArray())
+                            prelude.Add(line.AsString());
+                        if (prelude.Count > 0)
+                        {
+                            ItsLoading.Presentation?.SeedLog(prelude);
+                            Log.Warn($"[ItsLoading] prelude log imported ({prelude.Count} lines)");
+                        }
+                    }
                     var entries = new List<(string, string, double)>();
                     if (arr[1].VariantType == Variant.Type.Array)
                     {

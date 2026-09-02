@@ -10,7 +10,7 @@ namespace ItsLoading;
 
 /// <summary>
 /// 单一底部进度条,贯穿整个启动过程。本类是启动编排层:Init 顺序与
-/// load-order 调整;进度刻度在 BootTimeline,UI 呈现在 Themes/。
+/// load-order 调整;进度刻度在 BootTimeline,UI 呈现在 render/ 与 themes/。
 ///
 /// 布局约束(同步突发期间 deferred 不执行):
 ///   1. 不用 Container/CenterContainer,全部节点手动定位
@@ -19,7 +19,11 @@ namespace ItsLoading;
 /// 模块导览:
 ///   BootTimeline.cs     —— 启动时间线(刻度表 + span 记录 + 冻结;钩子经它推进度)
 ///   Patches/            —— Harmony 补丁(loader / boot phases / mod icon)
-///   Themes/             —— 主题呈现(C# 接口 + gd 文件:boot.gd / kit.gd / &lt;id&gt;/theme.gd)
+///   render/             —— 加载屏呈现层(gd 引导 boot.gd/kit.gd/interpreter.gd +
+///                          C# 桥 GdBridgeBar + 视图模型 LoadingPresentation +
+///                          主题包发现 ThemePacks + 平台原生呈现面 macos/、windows/)
+///   themes/             —— 主题数据(themes/&lt;id&gt;/theme.json + 素材;内置主题,
+///                          外部包经 ThemePacks 发现)
 ///   BootSplash.cs       —— gd 树自注入(user://itsloading 差异刷新)与锚点交接
 ///   WaterfallViewer.cs  —— 瀑布图查看器(菜单就绪后的调试 UI)
 /// </summary>
@@ -37,15 +41,75 @@ public static class ItsLoading
     /// <summary>当前主题,Init 的 build bar 步骤创建;在 BaseLib 设置里切换,下次启动生效。</summary>
     internal static ILoadingTheme Theme;
 
+    /// <summary>冻结期原生呈现协调器(macOS beta 冻结窗口内的进度指示),
+    /// Init 里创建;门控语义与平台面见 render/FreezeScreen.cs。</summary>
+    internal static FreezeScreen Freeze;
+
+    /// <summary>唯一加载屏视图模型(文案包装/日志环/不定时钟):Presenter 组合点
+    /// 先经它,再并联喂 gd 主题与原生呈现面 —— 见 render/LoadingPresentation.cs。</summary>
+    internal static LoadingPresentation Presentation;
+
     public static void Init()
     {
         Log.Warn($"[ItsLoading] v{typeof(ItsLoading).Assembly.GetName().Version} initializer " +
                  $"@ +{Sw.ElapsedMilliseconds}ms frame={Engine.GetFramesDrawn()}");
+        Run("freeze probe init", FreezeProbe.Init);
+        FreezeProbe.Sample("init");
         I18n.Init();
+        // 唯一视图模型先于一切呈现器建立(阶段文本包装与 gd 旧 _stage_text 同式同键)
+        Presentation = new LoadingPresentation((stage, step) => I18n.T("bar.stage", new()
+        {
+            ["n"] = stage.ToString(),
+            ["t"] = LoadingViewState.StageCount.ToString(),
+            ["name"] = step,
+        }));
         int total = Math.Max(1, ModManager.Mods.Count);
         // 双时钟注入,构造时记下两者的偏移;呈现是 push 模型 —— Present 密度
         // = 加载活动密度(Presenter 在 build bar 步骤接到主题)
         Timeline = new BootTimeline(() => (long)Time.GetTicksMsec(), () => Sw.ElapsedTicks);
+        // (Beta)原生加载屏渲染器(默认开):关 = 完全旧 gd+C# 路径 —— 不创建
+        // 冻结呈现协调器,连冻结期的原生细条也不出现(排障逃生舱,下次启动生效)
+        if (ThemeRegistry.NativeRendererEnabled())
+        {
+            // 原生呈现面消费的 ThemeDef(与 gd interpreter 同一份 theme.json);
+            // 加载失败由面内细条兜底,不阻断
+            ThemeDef? nativeDef = null;
+            string nativeThemeDir = "";
+            Run("load native theme def", () =>
+            {
+                // 发现层先于消费:Init 早期,ModManager 已填全 _mods(先于任何 TryLoadMod)
+                string builtinThemes = System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(typeof(ItsLoading).Assembly.Location) ?? ".",
+                    "themes");
+                ThemePacks.DiscoverAndCache(builtinThemes);
+                string id = ThemeRegistry.Current();
+                nativeThemeDir = ThemePacks.DirOf(id) ?? System.IO.Path.Combine(builtinThemes, id);
+                nativeDef = ThemeDef.Load(nativeThemeDir, w => Log.Warn(w));
+                Log.Warn(nativeDef != null
+                    ? $"[ItsLoading] native theme def loaded ({id}, {nativeDef.Elements.Count} elements)"
+                    : "[ItsLoading] native theme def unavailable — thin-bar fallback");
+            });
+            string version = typeof(ItsLoading).Assembly.GetName().Version?.ToString() ?? "";
+            Freeze = new FreezeScreen(
+                () => Engine.GetFramesDrawn(),
+                () => System.Threading.Thread.CurrentThread.ManagedThreadId == 1,
+                System.Environment.GetEnvironmentVariable,
+                () => OperatingSystem.IsMacOS()
+                    ? new MacLayerSurface(nativeDef, nativeThemeDir, version, k => I18n.T(k),
+                        ThemeRegistry.CalibViewEnabled())
+                    : null,
+                s => Log.Warn(s),
+                onAttach: () => Run("retire gd theme (native owns pixels)", () => Theme?.Retire()),
+                onBroken: () => Run("revive gd theme (native broke)", () =>
+                {
+                    Theme = GdBridgeBar.TryBuild();
+                    Timeline.Replay();
+                }));
+        }
+        else
+        {
+            Log.Warn("[ItsLoading] native renderer OFF (setting) — legacy gd path only this boot");
+        }
         Run("ensure boot splash installed", BootSplash.Install);
         // 主题 cfg 迁移/补默认(必须在 BuildTheme 前:先于 BaseLib 加载,
         // 它的 Load() 才能读到完整 Theme 键,不触发缺键重存)
@@ -69,6 +133,7 @@ public static class ItsLoading
         {
             for (int i = 0; i < 3; i++) RenderingServer.ForceDraw();
         });
+        FreezeProbe.Sample("after-first-paint");
         Run("patch loader", LoaderPatches.Install);
         Run("patch boot phases", BootPhasePatches.Install);
         Run("patch mod info icon", ModInfoIconPatches.Install);
@@ -99,12 +164,58 @@ public static class ItsLoading
     private static void BuildTheme()
     {
         Theme = GdBridgeBar.TryBuild();
-        if (Theme != null) Timeline.Presenter = Theme.Present;
-        else Log.Error("[ItsLoading] no loading UI this boot (see gd host logs above)");
+        if (Theme != null)
+        {
+            // 唯一写缝(BootTimeline 是唯一时间线写方)→ 视图模型一次 → 双视图并联:
+            // gd 主题(native 关闭时的全部 / 开启时的帧前期与兜底)+ 原生呈现面
+            //(冻结确立才挂载,挂载即令 gd 退场 —— 无双渲染;见 FreezeScreen)。
+            Timeline.Presenter = s =>
+            {
+                var snap = Presentation.Present(s);
+                Theme.Present(s, snap);
+                Freeze?.Present(s, snap);
+            };
+        }
+        else
+        {
+            Log.Error("[ItsLoading] no loading UI this boot (see gd host logs above)");
+            if (Freeze != null)
+                Timeline.Presenter = s => Freeze.Present(s, Presentation.Present(s));
+        }
     }
 
-    /// <summary>移除进度条(由主题自己完成 —— GdBridgeBar 会对其宿主节点调 takeover)。</summary>
-    internal static void RetireBar() => Theme?.Retire();
+    /// <summary>
+    /// 移除进度条:gd 主题自退;原生呈现面两段式 —— 0.4s 步进淡出后硬拆
+    /// (帧已在流动,CreateTimer 可用;任何异常直接硬拆兜底)。
+    /// </summary>
+    internal static void RetireBar()
+    {
+        Theme?.Retire();
+        Freeze?.Remove("retire");
+        FadeNativeOut();
+    }
+
+    private static async void FadeNativeOut()
+    {
+        if (Freeze == null) return;
+        try
+        {
+            // Task.Delay 的延续经 Godot 主线程同步上下文恢复(SetOpacity 要求主线程)
+            for (int i = 7; i >= 1; i--)
+            {
+                Freeze.SetOpacity(i / 8.0);
+                await System.Threading.Tasks.Task.Delay(50);
+            }
+        }
+        catch (Exception e)
+        {
+            Log.Warn($"[ItsLoading][overlay] fade skipped: {e.Message}");
+        }
+        finally
+        {
+            Freeze.Teardown();
+        }
+    }
 
     /// <summary>
     /// 耗时测量依赖"我们在其他 mod 之前加载"(补丁装上后才能观测后续加载)。

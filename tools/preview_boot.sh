@@ -1,6 +1,6 @@
 #!/bin/bash
 # 离屏预览全部主题(不启动游戏)。
-#   1) 假 mod 布局 = 仓库 Themes 的 gd 部分(boot/kit/<id>/)+ manifest + 各语言 strings.json
+#   1) 假 mod 布局 = 仓库 render/*.gd + themes/<id>/ + manifest + 各语言 strings.json
 #   2) 预览工程:驱动(preview_driver.gd)把 gd 树镜像到 user://itsloading(复刻
 #      C# Install 的同步),mod 目录经 ITSLOADING_PREVIEW_MOD_DIR 环境变量注入
 #      boot.gd —— 不改产品代码即可跑完整装载链
@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 
 PREVIEW_DIR="${PREVIEW_DIR:-/tmp/itsloading_preview}"
 rm -rf "$PREVIEW_DIR"
-mkdir -p "$PREVIEW_DIR/fake_exe/mods/ItsLoading/gd" "$PREVIEW_DIR/shots"
+mkdir -p "$PREVIEW_DIR/fake_exe/mods/ItsLoading/render" "$PREVIEW_DIR/fake_exe/mods/ItsLoading/themes" "$PREVIEW_DIR/shots"
 
 # Godot 可执行文件:.env 的 GODOT_BIN > /Applications 探测(与 check_gd_template.py 同一回退顺序)
 if [[ -z "${GODOT_BIN:-}" ]]; then
@@ -23,10 +23,9 @@ if [[ -z "${GODOT_BIN:-}" ]]; then
 fi
 [[ -n "$GODOT_BIN" && -x "$GODOT_BIN" ]] || { echo "!! 未找到 Godot,请在 .env 设 GODOT_BIN" >&2; exit 1; }
 
-# 1) 假 mod 布局(与 install.sh 相同的布局)
-cp src/ItsLoading/Themes/boot.gd src/ItsLoading/Themes/kit.gd "$PREVIEW_DIR/fake_exe/mods/ItsLoading/gd/"
-cp -R src/ItsLoading/Themes/classic src/ItsLoading/Themes/minespire src/ItsLoading/Themes/gachathespire \
-   "$PREVIEW_DIR/fake_exe/mods/ItsLoading/gd/"
+# 1) 假 mod 布局(与 install.sh 相同的布局;主题整树)
+cp src/ItsLoading/render/*.gd "$PREVIEW_DIR/fake_exe/mods/ItsLoading/render/"
+cp -R src/ItsLoading/themes/. "$PREVIEW_DIR/fake_exe/mods/ItsLoading/themes/"
 cp src/ItsLoading/ItsLoading.json "$PREVIEW_DIR/fake_exe/mods/ItsLoading/"
 for f in src/ItsLoading/localization/*/strings.json; do
   lang_dir="${f%/strings.json}"

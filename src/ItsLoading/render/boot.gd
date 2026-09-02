@@ -1,12 +1,13 @@
 # boot.gd —— LoadingBar 启动视图 bootstrap(ItsLoading mod 自注入)。
 #
 # 角色:帧 0 起效的加载指示器宿主。自身不含任何主题视觉 —— 按 cfg 主题从
-# user://itsloading/themes/<id>/theme.gd 装载主题,经 ctx 注入 kit 与运行环境,
-# 之后只做四件事:驱动快照(平滑数学/不定相位/活动流)、桥协议端点、
-# 工坊前奏轮询、自检与自清理。
+# user://itsloading/themes/<id>/theme.json 装载声明式主题(经 render/interpreter.gd
+# 渲染),经 ctx 注入 kit 与运行环境,之后只做四件事:驱动快照(平滑数学/不定
+# 相位/活动流)、桥协议端点、工坊前奏轮询、自检与自清理。
 #
-# 主题合同(三个动词,全部在 user:// 下,改主题不用碰本文件):
-#   theme_build(ctx)   ctx = {root, viewport, mod_dir, txt, kit, theme_id, mod_version}
+# 主题合同(三个动词,interpreter 实现,词汇表见 interpreter.gd 头注):
+#   theme_build(ctx)   ctx = {root, viewport, mod_dir, txt, kit, theme_id, mod_version,
+#                             theme_dir};返回 bool(false = 主题不可用,走回退链)
 #   theme_apply(snap)  snap = {overall, local, indeterminate, t, stage, stage_changed,
 #                              step, detail, log_entries}
 #   theme_retire()     停自身动画;可见性(淡出/立即隐藏)归本节点
@@ -30,8 +31,11 @@ const MOD_ID := "ItsLoading"
 const LOG_PATH := "user://logs/godot.log"
 const FRAC_END := 0.25  # 工坊段在全程刻度中的终点(与 C# BootTimeline.WorkshopEnd 配对)
 const CLEANUP_DELAY := 2.0
-const KIT_PATH := "user://itsloading/kit.gd"
-const THEMES_DIR := "user://itsloading"
+const RENDER_DIR := "user://itsloading/render"
+const KIT_PATH := "user://itsloading/render/kit.gd"
+const THEME_MAP_PATH := "user://itsloading/render/theme-map.json"
+const INTERPRETER_PATH := "user://itsloading/render/interpreter.gd"
+const THEMES_DIR := "user://itsloading/themes"
 const FALLBACK_THEME := "classic"
 const STAGE_COUNT := 7  # 启动阶段数(与 C# LoadingViewState.StageCount 配对)
 const FADE_S := 0.4     # 退场淡出(帧还在流动时;帧冻结时立即隐藏)
@@ -39,7 +43,7 @@ const LOG_STREAM_CAP := 60  # 活动流上限(窗口淘汰归各主题的 LogWin
 const SMOOTH_SPEED := 5.0
 const BRIDGE_WATCHDOG_MSEC := 300000  # 仅兜底 C# 中途死亡;须远高于合法的慢云同步/慢 mod 启动
 
-var bridge_version := 9
+var bridge_version := 11
 
 # ---- 前奏(工坊扫描)状态 ----
 var boot_start_msec := 0  # C# Handoff 读取的引擎启动锚点
@@ -136,12 +140,31 @@ func _build_ui() -> bool:
 		push_error("[LoadingBarBoot] theme load FAILED (", _theme_id, ") — no loading UI this boot")
 		return false
 
-	# kit 的素材根 = gd 树根(主题素材与 theme.gd 同目录,主题内引用 "themes/<id>/…")
-	var kit = kit_script.new(_mod_dir().path_join("gd"))
+	# kit 的素材根随主题来源:内置 = 本 mod themes 根;包 = 包内 themes 根
+	# (主题内引用 "<id>/…" 在两种根下都成立)
+	var kit = kit_script.new(_kit_root if _kit_root != "" else _mod_dir().path_join("themes"))
+	if not _instantiate_theme(theme_script, kit, vs):
+		# 主题构建失败(JSON 不可解析)→ classic 兜底再试一次
+		_theme_node.queue_free()
+		_theme_node = null
+		if _theme_id != FALLBACK_THEME:
+			print("[LoadingBarBoot] theme '", _theme_id, "' failed — falling back to ", FALLBACK_THEME)
+			_theme_id = FALLBACK_THEME
+			theme_script = _load_theme_script(_theme_id)
+			if theme_script == null or not _instantiate_theme(theme_script, kit, vs):
+				return false
+		else:
+			return false
+	return true
+
+
+# 实例化并构建主题(theme.gd 返回 void → null;interpreter 返回 bool。
+# null != false:旧脚本永视作构建成功,失败语义只属于声明式主题)。
+func _instantiate_theme(theme_script: GDScript, kit, vs: Vector2) -> bool:
 	_theme_node = theme_script.new()
 	_theme_node.name = "LoadingTheme"
 	_root.add_child(_theme_node)
-	_theme_node.theme_build({
+	var built = _theme_node.theme_build({
 		"root": _root,
 		"viewport": vs,
 		"mod_dir": _mod_dir(),
@@ -149,31 +172,76 @@ func _build_ui() -> bool:
 		"kit": kit,
 		"theme_id": _theme_id,
 		"mod_version": _mod_version(),
+		"theme_dir": _theme_dir if _theme_dir != "" else THEMES_DIR.path_join(_theme_id),
+		"calib": _calib_view,
 	})
-	return true
+	return built != false
 
 
+# 主题装载:theme.json(声明式,经 interpreter.gd 渲染)。id 解析链(Inc 8):
+# 镜像 themes/<id>(内置,上次启动由 C# 差异刷新)→ 缓存 theme-map.json
+# (外部包,id → 包内绝对目录;C# 上次启动写入,一次性滞后是设计内行为)
+# → 未知 id 回 classic。theme_dir 与 kit 素材根随解析结果切换(包主题的
+# 素材在包目录里,不在镜像)。
 func _load_theme_script(id: String) -> GDScript:
-	return ResourceLoader.load(THEMES_DIR.path_join(id).path_join("theme.gd"), "GDScript",
+	var res := _resolve_theme(id)
+	if res.is_empty():
+		return null
+	_theme_dir = res["theme_dir"]
+	_kit_root = res["kit_root"]
+	var interp: GDScript = ResourceLoader.load(INTERPRETER_PATH, "GDScript",
 		ResourceLoader.CACHE_MODE_IGNORE)
+	if interp == null:
+		push_error("[LoadingBarBoot] interpreter load FAILED (" + INTERPRETER_PATH + ")")
+	return interp
+
+
+var _theme_dir := ""
+var _kit_root := ""
+
+
+func _resolve_theme(id: String) -> Dictionary:
+	# 1) 内置镜像
+	if FileAccess.file_exists(THEMES_DIR.path_join(id).path_join("theme.json")):
+		return {"theme_dir": THEMES_DIR.path_join(id),
+			"kit_root": _mod_dir().path_join("themes")}
+	# 2) 外部包缓存(绝对路径;目录可能已随退订消失,读时校验)
+	var map = JSON.parse_string(FileAccess.get_file_as_string(THEME_MAP_PATH))
+	if map is Dictionary and map.get(id) is String:
+		var dir: String = map[id]
+		if dir.begins_with("/") and FileAccess.file_exists(dir.path_join("theme.json")):
+			return {"theme_dir": dir, "kit_root": dir.get_base_dir()}
+	return {}
 
 
 # ---------------- 主题选择(与 C# ThemeRegistry 读同一 cfg) ----------------
 
 func _read_theme() -> String:
-	# 读链:cfg 的 Theme 键(枚举名,to_lower 统一)→ 旧 txt(迁移完成前的过渡启动,
-	# C# MigrateToCfg 稍后并入并删除)→ classic。
-	var p := "user://mod_configs/ItsLoading.cfg"
+	# 读链:独占主题文件的 Theme 键 → 旧 cfg 键(过渡启动;BaseLib 拥有该文件,
+	# 属性变更后会整体重写抹掉 Theme,故只作回退)→ 旧 txt → classic。
+	# 顺带读 (Debug)标定视图开关(BaseLib 的字符串布尔 "True"/"False" 也认;
+	# 开关在 BaseLib 自己的 cfg 里,只从第一个路径读)。
+	var p := "user://mod_configs/ItsLoading.theme.cfg"
 	if FileAccess.file_exists(p):
 		var data = JSON.parse_string(FileAccess.get_file_as_string(p))
 		if data is Dictionary and data.get("Theme") is String:
 			return str(data["Theme"]).to_lower()
+	var bl := "user://mod_configs/ItsLoading.cfg"
+	if FileAccess.file_exists(bl):
+		var blata = JSON.parse_string(FileAccess.get_file_as_string(bl))
+		if blata is Dictionary:
+			_calib_view = str(blata.get("CalibView", "False")).to_lower() == "true"
+			if blata.get("Theme") is String:
+				return str(blata["Theme"]).to_lower()
 	var legacy := "user://itsloading_theme.txt"
 	if FileAccess.file_exists(legacy):
 		var s := FileAccess.get_file_as_string(legacy).strip_edges().to_lower()
 		if s != "":
 			return s
 	return FALLBACK_THEME
+
+
+var _calib_view := false
 
 
 
@@ -605,7 +673,7 @@ func _count_workshop() -> int:
 # end = 首见 dll 加载行;0 = 未观测到(C# 用自身时刻兜底)。
 # 旧脚本无此方法,C# 经 HasMethod 探测,缺席则跳过。
 func get_workshop_log() -> Array:
-	return [_ws_end_msec, _ws_order, _ws_names]
+	return [_ws_end_msec, _ws_order, _ws_names, _log_lines.duplicate()]
 
 
 # ---------------- C# 桥(本节点作为唯一加载 UI) ----------------
@@ -634,10 +702,11 @@ func show_hint(text: String) -> void:
 	t.timeout.connect(func() -> void: l.queue_free())
 
 
-# 全程呈现:双条完整快照。
-# _done(已关闭/被压制)或主题未建时静默丢弃。
+# 全程呈现(v11):step_text 已含阶段包装、log 为全量流(含前奏行)——
+# 两者由 C# 侧 LoadingPresentation 统一产出,本侧只做平滑与渲染。
+# log 非空才替换(空 = C# 侧检测未变,沿用上次);_done/主题未建时静默丢弃。
 func csharp_present(overall: float, local: float, stage: int,
-		step: String, detail: String) -> void:
+		step_text: String, detail_text: String, log) -> void:
 	if _done or _theme_node == null:
 		return
 	_bridge_last_present_msec = Time.get_ticks_msec()
@@ -646,7 +715,7 @@ func csharp_present(overall: float, local: float, stage: int,
 	if is_nan(overall) or is_nan(local):
 		_nan_count += 1
 		push_error("[ItsLoading] NaN present #%d: overall=%s local=%s stage=%d step='%s'" %
-			[_nan_count, overall, local, stage, step])
+			[_nan_count, overall, local, stage, step_text])
 		if is_nan(local):
 			local = -1.0
 		if is_nan(overall):
@@ -663,14 +732,10 @@ func csharp_present(overall: float, local: float, stage: int,
 		_overall_display = _overall_target
 		if not _local_indeterminate:
 			_local_display = _local_target
-	_step_text = _stage_text(stage, step)
-	_detail_text = detail
-	# 活动日志:阶段切换记里程碑;否则记 detail——mod 的 prefix/postfix 各一行,
-	# 资产为「n/N · 文件」,计时的裸「+ms」带上步骤名。
-	if stage_changed:
-		_log_line(step)
-	elif detail != "":
-		_log_line(step + " " + detail if detail.begins_with("+") else detail)
+	_step_text = step_text
+	_detail_text = detail_text
+	if log is Array and log.size() > 0:
+		_log_lines = log
 	_apply()
 
 

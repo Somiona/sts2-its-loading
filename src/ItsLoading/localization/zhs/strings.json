@@ -46,5 +46,9 @@
   "wf.handoffGap": "Godot引擎启动",
   "phase.prelude": "预加载(Steam+工坊+本地扫描)",
   "phase.engine_init": "引擎初始化(C++,第 0 帧之前)",
-  "phase.mod_load": "模组加载总段"
+  "phase.mod_load": "模组加载总段",
+  "gallery.title": "主题画廊",
+  "gallery.apply": "应用(下次启动生效)",
+  "gallery.applied": "已应用 —— 下次启动生效",
+  "gallery.close": "关闭"
 }

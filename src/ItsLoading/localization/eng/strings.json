@@ -46,5 +46,9 @@
   "wf.handoffGap": "Godot engine startup",
   "phase.prelude": "Prelude (Steam + Workshop + local scan)",
   "phase.engine_init": "Engine init (C++, before frame 0)",
-  "phase.mod_load": "Mod loading"
+  "phase.mod_load": "Mod loading",
+  "gallery.title": "Theme gallery",
+  "gallery.apply": "Apply (next launch)",
+  "gallery.applied": "Applied — takes effect next launch",
+  "gallery.close": "Close"
 }

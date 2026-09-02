@@ -261,6 +261,143 @@ func bar_outline(parent: Control, st: Dictionary) -> BarFill:
 	return BarFill.new(fill, w - 2.0 * inset, inset)
 
 
+# ================================================================ 图标行 / 蒙版轨道
+# (gachathespire 首创;theme.json 解释器与原生冻结呈现面是第二/三消费者,故进本库)
+
+# 一行等距图标(可作进度轨道)。坐标全部屏幕像素(设计矩形先经 DesignSpace 换算);
+# cx = 行中心。返回 {row: Array[Control], geom: {x, span, size, gap, count}}
+# —— geom 供 gap_dots / mask_track 复用同一套行几何。
+# st: {count, size, gap, cx, cy | bottom, pivot,
+#      file 或 file_pattern + index_base, nearest, placeholder_color}
+func icon_row(parent: Control, st: Dictionary) -> Dictionary:
+	_check("icon_row", st, ["count", "size", "gap", "cx", "cy", "bottom", "pivot",
+		"file", "file_pattern", "index_base", "nearest", "placeholder_color"])
+	var count := maxi(1, int(st.get("count", 1)))
+	var size: float = st.get("size", 32.0)
+	var gap: float = st.get("gap", 0.0)
+	var span: float = count * size + (count - 1.0) * gap
+	var x: float = st.get("cx", 0.0) - span * 0.5
+	var row: Array = []
+	for i in count:
+		var file := str(st.get("file", "")) if st.has("file") \
+			else str(st.get("file_pattern", "%d")) % (int(st.get("index_base", 1)) + i)
+		var rect: Rect2
+		if st.has("bottom"):
+			# 底边锚:放大时底边不动、原地向上长大(pivot "bottom" 配对)
+			rect = Rect2(Vector2(x + i * (size + gap), st.get("bottom", 0.0) - size),
+				Vector2(size, size))
+		else:
+			var cy: float = st.get("cy", 0.0)
+			rect = Rect2(Vector2(x + i * (size + gap), cy - size * 0.5), Vector2(size, size))
+		row.append(_tex_or_placeholder(parent, file, rect,
+			st.get("placeholder_color", Color.GRAY), st.get("nearest", true)))
+		_apply_pivot(row[i], rect, str(st.get("pivot", "center")))
+	return {"row": row, "geom": {"x": x, "span": span, "size": size, "gap": gap, "count": count}}
+
+
+# 当前行放大标记:stage1 从 1 计;只写 Scale 变换(矩形终身不变,突发冻结期照常生效)
+func mark_stage(row: Array, stage1: int, factor: float) -> void:
+	if row.is_empty():
+		return
+	var idx: int = clampi(stage1, 1, row.size()) - 1
+	for i in row.size():
+		row[i].scale = Vector2(factor, factor) if i == idx else Vector2.ONE
+
+
+# 行间隙常驻圆点:几何取自 icon_row 的返回 geom(圆心 = 相邻两图标间隙中点)。
+# st: {dot_scale, color, cy};返回各圆点 Rect2(供蒙版副本复用)
+func gap_dots(parent: Control, geom: Dictionary, st: Dictionary) -> Array:
+	_check("gap_dots", st, ["dot_scale", "color", "cy"])
+	var size: float = float(geom.size) * float(st.get("dot_scale", 0.2))
+	var cy: float = st.get("cy", 0.0)
+	var circle: ImageTexture = circle_tex()
+	var rects: Array = []
+	for j in int(geom.count) - 1:
+		var dcx: float = float(geom.x) + (float(j) + 1.0) * float(geom.size) \
+			+ float(j) * float(geom.gap) + float(geom.gap) * 0.5
+		var rect := Rect2(Vector2(dcx - size * 0.5, cy - size * 0.5), Vector2(size, size))
+		tex_rect(parent, {"tex": circle, "rect": rect, "modulate": st.get("color", Color.WHITE)})
+		rects.append(rect)
+	return rects
+
+
+# 剪贴蒙版暗层(gachathespire 首创):贴图按 tint 暗调,仅轨分数段 [seg_a, seg_b]
+# 内可见;nf_* 构建期烘焙各节点在轨上的分数几何。进度更新只写 seg_a/seg_b
+# (全节点同值)—— set_shader_parameter 走 RenderingServer,不触 Control 矩形,
+# 同步突发冻结期照常生效(与第一排放大标记的变换路径是同一约束)。
+class MaskFill extends RefCounted:
+	var _mats: Array = []
+	var _shader: Shader
+
+	const FILL_GLSL := """shader_type canvas_item;
+uniform float seg_a = 0.0;
+uniform float seg_b = 0.0;
+uniform float nf_left = 0.0;
+uniform float nf_width = 1.0;
+uniform vec4 tint : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+
+void fragment() {
+	vec4 c = texture(TEXTURE, UV);
+	float x = nf_left + UV.x * nf_width;
+	float vis = step(seg_a, x) * step(x, seg_b) * step(0.0001, seg_b - seg_a);
+	COLOR = vec4(c.rgb * tint.rgb, c.a * tint.a * vis);
+}"""
+
+	func _init(glsl := FILL_GLSL) -> void:
+		_shader = Shader.new()
+		_shader.code = glsl
+
+	func add(parent: Control, tex: Texture2D, rect: Rect2,
+			nf_left: float, nf_width: float, tint: Color) -> void:
+		var t := TextureRect.new()
+		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE  # 钳制陷阱:必须先于 texture
+		t.texture = tex
+		t.stretch_mode = TextureRect.STRETCH_SCALE
+		t.position = rect.position
+		t.size = rect.size
+		t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var mat := ShaderMaterial.new()
+		mat.shader = _shader
+		mat.set_shader_parameter("tint", tint)
+		mat.set_shader_parameter("nf_left", nf_left)
+		mat.set_shader_parameter("nf_width", nf_width)
+		mat.set_shader_parameter("seg_a", 0.0)
+		mat.set_shader_parameter("seg_b", -1.0)  # 空段:首帧填充前不可见
+		t.material = mat
+		parent.add_child(t)
+		_mats.append(mat)
+
+	# 段参数写入全部副本材质(全节点同值):确定 = [0, local];不定 = 1/4 宽滑段扫过
+	func segment(local: float, indeterminate: bool, t: float, cycle_s: float) -> void:
+		var a := 0.0
+		var b := 0.0
+		if indeterminate:
+			a = fposmod(t / maxf(0.1, cycle_s), 1.0) * 0.75
+			b = a + 0.25
+		else:
+			a = 0.0
+			b = clampf(local, 0.0, 1.0)
+		for m in _mats:
+			m.set_shader_parameter("seg_a", a)
+			m.set_shader_parameter("seg_b", b)
+
+
+# 蒙版轨道工厂:members = [{tex(Texture2D | null → 白方块占位), rect, tint}],
+# 轨分数域 = icon_row 的 geom(段 [0,1] 映射到行左缘→右缘)。
+func mask_track(parent: Control, geom: Dictionary, members: Array) -> MaskFill:
+	var mask := MaskFill.new()
+	var span := maxf(1.0, float(geom.span))
+	for m in members:
+		var tex: Texture2D = m.get("tex")
+		if tex == null:
+			tex = white_tex()
+		var rect: Rect2 = m.get("rect", Rect2())
+		mask.add(parent, tex, rect,
+			(rect.position.x - float(geom.x)) / span, rect.size.x / span,
+			m.get("tint", Color.WHITE))
+	return mask
+
+
 # ================================================================ 活动日志窗
 # entries = boot 已去重、已格式化的活动流(只读);窗口淘汰策略在内部。
 

@@ -18,7 +18,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-GD_DIR = ROOT / "src" / "ItsLoading" / "Themes"
+RENDER_DIR = ROOT / "src" / "ItsLoading" / "render"
+THEMES_DIR = ROOT / "src" / "ItsLoading" / "themes"
 
 # boot.gd 的桥协议面(C# GdBridgeBar.TryBuild / BootSplash.Handoff 依赖)
 BOOT_CONTRACT = [
@@ -86,18 +87,21 @@ def check_contract(path: Path, symbols: list[str], what: str) -> None:
 
 
 def main() -> None:
-    files = sorted(GD_DIR.rglob("*.gd"))
+    files = sorted(RENDER_DIR.rglob("*.gd")) + sorted(THEMES_DIR.rglob("*.gd"))
     if not files:
-        fail(f"{GD_DIR} 下没有 .gd 文件(目录结构变了?请同步本检查)")
+        fail(f"{RENDER_DIR} / {THEMES_DIR} 下没有 .gd 文件(目录结构变了?请同步本检查)")
     godot = find_godot()
     if not godot:
         print("  Godot 解析: 跳过(未找到可执行;可设 GODOT_BIN 启用)")
 
     print(f"gd source check({len(files)} 个文件):")
-    check_contract(GD_DIR / "boot.gd", BOOT_CONTRACT, "桥协议面")
-    for theme in sorted(GD_DIR.iterdir()):
+    check_contract(RENDER_DIR / "boot.gd", BOOT_CONTRACT, "桥协议面")
+    for theme in sorted(THEMES_DIR.iterdir()):
         if theme.is_dir():
-            check_contract(theme / "theme.gd", THEME_CONTRACT, "主题三动词")
+            if (theme / "theme.gd").exists():
+                check_contract(theme / "theme.gd", THEME_CONTRACT, "主题三动词")
+            elif not (theme / "theme.json").exists():
+                fail(f"{theme.name} 既无 theme.gd 也无 theme.json(词汇表校验在 check_themes.py)")
     print("  契约(boot 桥协议 / 主题三动词): 通过")
 
     for f in files:

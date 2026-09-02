@@ -2,8 +2,8 @@ using ItsLoading;
 using Xunit;
 
 // gd 桥的契约回归(纯函数部分;节点交互不在单测范围):
-//   版本门槛 —— 调用形状精确匹配 v9(BarFill 变换驱动:矩形终身满轨,
-//   进度只写 scale/position)
+//   版本门槛 —— 调用形状精确匹配 v11(LoadingPresentation 共用视图模型:
+//   csharp_present 收格式化 StepText + 全量日志流;旧节点 takeover + 晚期托管)
 
 public sealed class GdBridgeBarTests
 {
@@ -17,11 +17,13 @@ public sealed class GdBridgeBarTests
     [InlineData(6, false)]
     [InlineData(7, false)]
     [InlineData(8, false)]
-    [InlineData(9, true)]     // 当前协议版本
-    [InlineData(10, false)]   // 更新的版本必须显式适配后才能接管
+    [InlineData(9, false)]    // v9(theme.gd 时代)
+    [InlineData(10, false)]   // v10(文案双副本时代)在 v11 升级启动被 takeover 后重建
+    [InlineData(11, true)]    // 当前协议版本
+    [InlineData(12, false)]   // 更新的版本必须显式适配后才能接管
     public void VersionCompatible_requires_exact_bridge_version(int nodeVersion, bool expected)
     {
         Assert.Equal(expected, GdBridgeBar.VersionCompatible(nodeVersion));
-        Assert.Equal(9, GdBridgeBar.BridgeVersion);
+        Assert.Equal(11, GdBridgeBar.BridgeVersion);
     }
 }

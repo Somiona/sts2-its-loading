@@ -30,16 +30,29 @@ namespace ItsLoading
         [ConfigButton("View")]
         public void OpenWaterfall() => global::ItsLoading.WaterfallViewer.CompatHooks.OpenWaterfall();
 
+        [ConfigButton("OpenGallery")]
+        public void OpenThemeGallery() => global::ItsLoading.WaterfallViewer.CompatHooks.OpenGallery();
+
         /// <summary>
-        /// 加载主题下拉框(BaseLib 把 enum 静态属性渲染成 NConfigDropdown)。
-        /// 纯透传:主题值以 cfg 文件为准——getter 直读,setter 同步写。
-        /// BaseLib 全生命周期对它幂等:Init 快照默认值 = 读文件;构造 Load 写回
-        /// = 文件自己的值;Save 序列化 getter = 同值重写;恢复默认 → Classic。
+        /// (Beta)原生加载屏渲染器(BaseLib 把 bool 静态属性渲染成开关)。
+        /// 默认开;关 = 仅旧 gd+C# 路径,无任何原生冻结呈现,下次启动生效。
+        /// 注意:BaseLib「恢复默认」会把属性重置为 C# 默认 false(= 关),
+        /// 与我们"缺省=开"的文件语义不同 —— 可接受的边缘行为。
         /// </summary>
-        public static LoadingTheme Theme
+        public static bool NativeRenderer
         {
-            get => global::ItsLoading.WaterfallViewer.CompatHooks.GetTheme();
-            set => global::ItsLoading.WaterfallViewer.CompatHooks.SetTheme(value);
+            get => global::ItsLoading.WaterfallViewer.CompatHooks.GetNativeRenderer();
+            set => global::ItsLoading.WaterfallViewer.CompatHooks.SetNativeRenderer(value);
+        }
+
+        /// <summary>
+        /// (Debug)开发者标定视图(默认关):双渲染器同规则的品红元素框 + 10% 网格,
+        /// 主题开发/布局比对用。gd 与原生呈现面同时生效,下次启动起。
+        /// </summary>
+        public static bool CalibView
+        {
+            get => global::ItsLoading.WaterfallViewer.CompatHooks.GetCalibView();
+            set => global::ItsLoading.WaterfallViewer.CompatHooks.SetCalibView(value);
         }
     }
 }

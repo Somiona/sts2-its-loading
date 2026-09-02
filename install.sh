@@ -21,12 +21,17 @@ cp src/ItsLoading/ItsLoading.json "$GAME_MODS/"
 cp src/ItsLoading/mod_image.png "$GAME_MODS/"
 # 素材版权声明(狐狸 LGPL-2.1 出处 + logo AI 生成说明)
 cp LICENSE_CLAIM.md "$GAME_MODS/"
-# gd 启动视图整树(boot.gd + kit.gd + <id>/theme.gd 与主题素材)。
-# 仓库中位于 src/ItsLoading/Themes/(与 C# 共用该目录),发行只取 gd 部分,
-# 不带 .cs;C# Install 会把它们差异刷新到 user://itsloading/,override.cfg 指向那里
-mkdir -p "$GAME_MODS/gd"
-cp src/ItsLoading/Themes/boot.gd src/ItsLoading/Themes/kit.gd "$GAME_MODS/gd/"
-cp -R src/ItsLoading/Themes/classic src/ItsLoading/Themes/minespire src/ItsLoading/Themes/gachathespire "$GAME_MODS/gd/"
+# 加载屏呈现层与主题数据(仓库 src/ItsLoading/{render,themes} → 发行同名目录)。
+# render 发行只带 *.gd —— C# 桥/呈现面编译进 dll,不随数据发行;
+# C# Install 会把两棵树差异刷新到 user://itsloading/,override.cfg 指向那里
+# render/themes 是源树的完全派生物 —— 先清再拷(cp 不会删旧文件,残留会
+# 经镜像同步进入 user://,如已退役的 theme.gd)
+rm -rf "$GAME_MODS/render" "$GAME_MODS/themes"
+mkdir -p "$GAME_MODS/render" "$GAME_MODS/themes"
+cp src/ItsLoading/render/*.gd "$GAME_MODS/render/"
+cp -R src/ItsLoading/themes/. "$GAME_MODS/themes/"
+# v0.20 前的平铺布局(mod 根的 gd/ 目录)不再被读取,本地升级时清掉
+rm -rf "$GAME_MODS/gd"
 # 只松散复制各语言的 strings.json(gd/C# 运行时读磁盘);settings_ui.json 仅走 pck,
 # 松散放置会被游戏 mod 扫描器当 manifest 报错。语言列表自动发现。
 mkdir -p "$GAME_MODS/localization"

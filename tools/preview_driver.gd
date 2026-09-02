@@ -9,8 +9,6 @@
 # 蒙版段;同时全树做越轨断言,任何 FAIL 退出码 1。截图看观感,读数做回归。
 extends Node
 
-const THEMES := ["classic", "minespire", "gachathespire"]
-
 var boot: Node
 var _fails := 0
 
@@ -24,11 +22,35 @@ func _ready() -> void:
 	var user_dir := ProjectSettings.globalize_path("user://itsloading")
 	_rm_tree(user_dir)
 	DirAccess.make_dir_recursive_absolute(user_dir)
-	_copy_tree(mod_dir.path_join("gd"), user_dir)
-	for theme in THEMES:
+	_copy_tree(mod_dir.path_join("render"), user_dir.path_join("render"))
+	_copy_tree(mod_dir.path_join("themes"), user_dir.path_join("themes"))
+	var themes := _theme_names(user_dir.path_join("themes"))
+	if themes.is_empty():
+		push_error("[preview] 镜像里没有主题")
+		get_tree().quit(1)
+		return
+	for theme in themes:
 		await _run_theme(theme)
-	print("[preview] summary: fails=", _fails, " (", THEMES.size(), " themes)")
+	print("[preview] summary: fails=", _fails, " (", themes.size(), " themes)")
 	get_tree().quit(1 if _fails > 0 else 0)
+
+
+# 镜像主题目录扫描(与 check_theme_geometry 的仓库扫描同一约定)
+func _theme_names(themes_abs: String) -> Array[String]:
+	var out: Array[String] = []
+	var d := DirAccess.open(themes_abs)
+	if d == null:
+		return out
+	d.list_dir_begin()
+	var n := d.get_next()
+	while n != "":
+		if d.current_is_dir() and not n.begins_with(".") \
+				and FileAccess.file_exists(themes_abs.path_join(n + "/theme.json")):
+			out.append(n)
+		n = d.get_next()
+	d.list_dir_end()
+	out.sort()
+	return out
 
 
 # ---------------------------------------------------------------- 时间线剧本
@@ -42,7 +64,7 @@ func _run_theme(id: String) -> void:
 	var shots := OS.get_environment("PREVIEW_SHOTS").path_join(id)
 	DirAccess.make_dir_recursive_absolute(shots)
 
-	var script: GDScript = ResourceLoader.load("user://itsloading/boot.gd", "GDScript",
+	var script: GDScript = ResourceLoader.load("user://itsloading/render/boot.gd", "GDScript",
 		ResourceLoader.CACHE_MODE_IGNORE)
 	boot = script.new()
 	# root 忙:直接 add_child 会被拒,deferred 进树
@@ -51,25 +73,25 @@ func _run_theme(id: String) -> void:
 	_snap(shots, "01_boot_ready_stage1")
 	_readback(id, "stage1")
 	boot.csharp_attach()
-	boot.csharp_present(0.30, 0.40, 2, "Loading mods", "ItsLoading.dll +12ms")
+	boot.csharp_present(0.30, 0.40, 2, "[2/7] Loading mods", "ItsLoading.dll +12ms", ["preview workshop A"])
 	await get_tree().create_timer(0.3).timeout
 	_snap(shots, "02_stage2_local40")
 	_readback(id, "stage2")
-	boot.csharp_present(0.60, -1.0, 3, "Essential data", "")
+	boot.csharp_present(0.60, -1.0, 3, "[3/7] Essential data", "", [])
 	await get_tree().create_timer(0.6).timeout
 	_snap(shots, "03_stage3_indeterminate")
 	_readback(id, "stage3")
-	boot.csharp_present(0.70, 0.10, 4, "Opening assets", "12/120 splash.png")
-	boot.csharp_present(0.72, 0.60, 4, "Opening assets", "72/120 title.png")
+	boot.csharp_present(0.70, 0.10, 4, "[4/7] Opening assets", "12/120 splash.png", [])
+	boot.csharp_present(0.72, 0.60, 4, "[4/7] Opening assets", "72/120 title.png", [])
 	await get_tree().create_timer(0.9).timeout
 	_snap(shots, "04_stage4_smooth")
 	_readback(id, "stage4")
 	for i in range(20):
-		boot.csharp_present(0.80, float(i) / 20.0, 5, "Menu assets", "item_%d.png +3ms" % i)
+		boot.csharp_present(0.80, float(i) / 20.0, 5, "[5/7] Menu assets", "item_%d.png +3ms" % i, [])
 		await get_tree().create_timer(0.05).timeout
 	_snap(shots, "05_stage5_log_full")
 	_readback(id, "stage5")
-	boot.csharp_present(1.0, 1.0, 7, "Main menu", "ready")
+	boot.csharp_present(1.0, 1.0, 7, "[7/7] Main menu", "ready", ["menu ready"])
 	await get_tree().create_timer(0.3).timeout
 	_snap(shots, "06_stage7_done")
 	boot.takeover()
@@ -84,24 +106,30 @@ func _run_theme(id: String) -> void:
 
 func _readback(id: String, tag: String) -> void:
 	var t = boot.get("_theme_node")
-	if t != null and id == "gachathespire":
-		var row: Array = t.get("_row1")
-		var scales := []
-		for i in row.size():
-			scales.append(String.num(row[i].scale.x, 2))
-		var mats: Array = t.get("_mask").get("_mats")
+	if t != null and t.has_method("inspect"):
+		# 声明式主题(interpreter):读数只走 inspect() 观测面
+		var el: Dictionary = t.inspect()
+		var local = el["bars"].get("local")
+		if local != null:
+			var fill: ColorRect = local.get("_fill")
+			print("[readback] ", id, "/", tag,
+				" fill/track=", String.num(fill.scale.x * 100.0, 1), "%",
+				" pos.x=", String.num(fill.position.x, 1),
+				" rect.w=", String.num(fill.size.x, 1))
+		var scales: Array = []
+		var enlarged: Array = el["enlarge"].keys()
+		if not enlarged.is_empty():
+			var row: Array = el["rows"][enlarged[0]]
+			for i in row.size():
+				scales.append(String.num(row[i].scale.x, 2))
 		var seg := -1.0
-		if not mats.is_empty():
-			seg = float(mats[0].get_shader_parameter("seg_b"))
-		print("[readback] ", id, "/", tag, " scale=", scales,
-			" mask=", String.num(seg, 3))
-	elif t != null:
-		var local = t.get("_local")
-		var fill: ColorRect = local.get("_fill")
-		print("[readback] ", id, "/", tag,
-			" fill/track=", String.num(fill.scale.x * 100.0, 1), "%",
-			" pos.x=", String.num(fill.position.x, 1),
-			" rect.w=", String.num(fill.size.x, 1))
+		if el["mask"] != null:
+			var mats: Array = el["mask"].get("_mats")
+			if not mats.is_empty():
+				seg = float(mats[0].get_shader_parameter("seg_b"))
+		if not scales.is_empty() or seg >= 0.0:
+			print("[readback] ", id, "/", tag, " scale=", scales,
+				" mask=", String.num(seg, 3))
 	var layer = boot.get("_layer")
 	if layer != null:
 		_check_contains(layer, "%s/%s" % [id, tag])

@@ -1,9 +1,8 @@
 {
   "ITSLOADING-mod_title": "It's Loading",
   "ITSLOADING-OPEN_WATERFALL.title": "Startup waterfall",
+  "ITSLOADING-OPEN_GALLERY.title": "Theme gallery",
   "ITSLOADING-VIEW.title": "View",
-  "ITSLOADING-THEME.title": "Loading theme (applies next launch)",
-  "ITSLOADING-THEME.Classic": "Classic",
-  "ITSLOADING-THEME.Minespire": "Minespire",
-  "ITSLOADING-THEME.GachaTheSpire": "GachaTheSpire"
+  "ITSLOADING-NATIVE_RENDERER.title": "(Beta) Native loading screen renderer",
+  "ITSLOADING-CALIB_VIEW.title": "(Debug) Developer calibration view"
 }

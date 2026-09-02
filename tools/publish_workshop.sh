@@ -37,12 +37,12 @@ cp src/ItsLoadingCompat/bin/Release/net9.0/ItsLoadingCompat.dll "$STAGE/"
 cp src/ItsLoading/ItsLoading.json src/ItsLoading/mod_image.png "$STAGE/"
 # 素材版权声明(狐狸 LGPL-2.1 出处 + logo AI 生成说明)
 cp LICENSE_CLAIM.md "$STAGE/"
-# gd 启动视图整树(boot.gd + kit.gd + <id>/theme.gd 与主题素材,含
-# 狐狸 © NeoForged contributors, LGPL-2.1;仓库中位于
-# src/ItsLoading/Themes/(与 C# 共用该目录),发行只取 gd 部分不带 .cs)
-mkdir -p "$STAGE/gd"
-cp src/ItsLoading/Themes/boot.gd src/ItsLoading/Themes/kit.gd "$STAGE/gd/"
-cp -R src/ItsLoading/Themes/classic src/ItsLoading/Themes/minespire src/ItsLoading/Themes/gachathespire "$STAGE/gd/"
+# 加载屏呈现层与主题数据(含狐狸 © NeoForged contributors, LGPL-2.1;
+# 仓库 src/ItsLoading/{render,themes} → 发行同名目录,render 只带 *.gd 不带 .cs)
+mkdir -p "$STAGE/render" "$STAGE/themes"
+cp src/ItsLoading/render/*.gd "$STAGE/render/"
+# 主题目录整树复制(新增主题 = 建 themes/<id>/,此处零改动)
+cp -R src/ItsLoading/themes/. "$STAGE/themes/"
 # 只带各语言 strings.json(与 install.sh 一致;settings_ui.json 仅走 pck,
 # 松散放置会被游戏 mod 扫描器当 manifest 报错)
 for f in src/ItsLoading/localization/*/strings.json; do

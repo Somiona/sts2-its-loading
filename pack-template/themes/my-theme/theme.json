@@ -1,0 +1,59 @@
+{
+  "format": 1,
+  "space": {
+    "kind": "design",
+    "w": 854,
+    "h": 480
+  },
+  "elements": [
+    {
+      "id": "bg",
+      "type": "bg",
+      "color": "#101820ff"
+    },
+    {
+      "id": "step",
+      "type": "label",
+      "bind": "step",
+      "text": {
+        "loc": "bar.starting"
+      },
+      "x": 227,
+      "y": 210,
+      "font": 22,
+      "color": "#ffffffff"
+    },
+    {
+      "id": "overall",
+      "type": "bar_solid",
+      "bind": "overall",
+      "x": 127,
+      "y": 270,
+      "w": 600,
+      "h": 8,
+      "track": "#ffffff22",
+      "fill": "#33d9e6ff"
+    },
+    {
+      "id": "detail",
+      "type": "label",
+      "bind": "detail",
+      "text": "",
+      "x": 227,
+      "y": 292,
+      "font": 13,
+      "color": "#9ea3b3ff"
+    },
+    {
+      "id": "log",
+      "type": "log_column",
+      "bind": "log",
+      "x": 24,
+      "y": 330,
+      "lines": 6,
+      "line_h": 17,
+      "font": 11,
+      "color": "#9ea3b3ff"
+    }
+  ]
+}
