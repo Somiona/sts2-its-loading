@@ -9,7 +9,7 @@ namespace ItsLoading;
 /// <summary>
 /// 加载屏的唯一视图模型(2026-09-02 收敛):把 LoadingViewState 加工成两个
 /// 渲染器(gd interpreter / 原生呈现面)共用的呈现快照 —— 阶段文本包装、
-/// 活动日志环、不定相位时钟。此前这套逻辑在 boot.gd 与 FreezeScreen 各有
+/// 活动日志环与单调时间采样。此前这套逻辑在 boot.gd 与原生路径各有
 /// 一份且已漂移(native 文案缺阶段包装、日志缺前奏行),现为单一事实源。
 ///
 /// 数据流:BootTimeline(模型)→ 本类(视图模型)→ 双渲染器(视图)。
@@ -25,6 +25,7 @@ internal sealed class LoadingPresentation
     private readonly Func<int, string, string> _stageText;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly List<string> _log = new();
+    private string[] _logSnapshot = Array.Empty<string>();
     private string _lastLine = "";
     private int _lastStage;
     private string _lastDetail = "";
@@ -35,15 +36,16 @@ internal sealed class LoadingPresentation
     }
 
     /// <summary>呈现一次(在 BootTimeline.Presenter 组合点调用,先于双渲染器)。</summary>
-    internal PresentedSnapshot Present(LoadingViewState state)
+    internal LoadingFrame Present(LoadingViewState state)
     {
         bool stageChanged = (int)state.Stage != _lastStage;
         if (stageChanged) _lastStage = (int)state.Stage;
-        UpdateLog(state, stageChanged);
-        return new PresentedSnapshot(
+        if (UpdateLog(state, stageChanged)) SnapshotLog();
+        return new LoadingFrame(
             state.Stage, state.Overall, state.Local, state.LocalIndeterminate,
             _clock.Elapsed.TotalSeconds, stageChanged,
-            _stageText((int)state.Stage, state.Step ?? ""), state.Detail ?? "", _log);
+            _stageText((int)state.Stage, state.Step ?? ""), state.Detail ?? "",
+            _logSnapshot, state.ForceDraw);
     }
 
     /// <summary>灌入 gd 前奏日志(boot.gd 轮询所得,经 BootSplash.Handoff 上交)。
@@ -53,9 +55,10 @@ internal sealed class LoadingPresentation
     {
         _log.InsertRange(0, preludeLines);
         Trim();
+        SnapshotLog();
     }
 
-    private void UpdateLog(LoadingViewState state, bool stageChanged)
+    private bool UpdateLog(LoadingViewState state, bool stageChanged)
     {
         // 镜像原 boot.gd _log_line 语义:阶段切换记里程碑;否则 detail 变化记行
         // (裸「+ms」计时行带上步骤名);连续相同只记一次
@@ -69,21 +72,25 @@ internal sealed class LoadingPresentation
         {
             line = d.StartsWith('+') ? $"{state.Step} {d}" : d;
         }
-        if (line.Length == 0 || line == _lastLine) return;
+        if (line.Length == 0 || line == _lastLine) return false;
         _lastLine = line;
         _lastDetail = state.Detail ?? "";
         _log.Add(line);
         Trim();
+        return true;
     }
 
     private void Trim()
     {
         if (_log.Count > LogCap) _log.RemoveRange(0, _log.Count - LogCap);
     }
+
+    private void SnapshotLog() => _logSnapshot = _log.ToArray();
 }
 
-/// <summary>双渲染器共用的呈现快照。StepText 已含阶段包装(与 gd 旧输出逐字节一致)。</summary>
-internal readonly record struct PresentedSnapshot(
+/// <summary>所有呈现 adapter 的唯一不可变输入。业务状态、格式化文案、日志快照与
+/// 出帧提示到此收口；renderer 不再读取 BootTimeline 或 LoadingPresentation。</summary>
+internal readonly record struct LoadingFrame(
     BootStage Stage,
     float Overall,
     float Local,
@@ -92,4 +99,5 @@ internal readonly record struct PresentedSnapshot(
     bool StageChanged,
     string StepText,
     string DetailText,
-    IReadOnlyList<string> Log);
+    IReadOnlyList<string> Log,
+    bool ForceDraw);

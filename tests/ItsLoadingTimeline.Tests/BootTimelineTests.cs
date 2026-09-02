@@ -20,8 +20,12 @@ internal sealed class ScriptedClock
     public long EngineMsec;
     public long Ticks;
 
-    internal BootTimeline MakeTimeline(Spy spy) =>
-        new(() => EngineMsec, () => Ticks) { Presenter = spy.AsPresenter() };
+    internal BootTimeline MakeTimeline(Spy spy)
+    {
+        var timeline = new BootTimeline(() => EngineMsec, () => Ticks);
+        timeline.Connect(spy.AsPresenter());
+        return timeline;
+    }
 
     /// <summary>毫秒 → Stopwatch ticks(按本机 Frequency,与生产同一换算)。</summary>
     public long MsToTicks(double ms) => (long)(ms / 1000.0 * Stopwatch.Frequency);
@@ -36,6 +40,14 @@ internal sealed class ScriptedClock
 public class BootTimelineTests
 {
     private static Func<int, string> Text(string prefix) => n => $"{prefix}{n}";
+
+    [Fact]
+    public void Presenter_connection_is_single_assignment()
+    {
+        var timeline = new BootTimeline(() => 0, () => 0);
+        timeline.Connect(_ => { });
+        Assert.Throws<InvalidOperationException>(() => timeline.Connect(_ => { }));
+    }
 
     [Fact]
     public void BeginMods_presents_overall_and_local_progress()

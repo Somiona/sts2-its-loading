@@ -71,8 +71,14 @@ internal sealed class BootTimeline
 
     // ---- 状态(主线程独占写入) ----
 
-    /// <summary>呈现回调(push 模型):主题只消费完整快照。</summary>
-    public Action<LoadingViewState>? Presenter;
+    /// <summary>唯一向下游发布的写缝；Connect 只能调用一次，避免运行时改线或反向 replay。</summary>
+    private Action<LoadingViewState>? _presenter;
+
+    internal void Connect(Action<LoadingViewState> presenter)
+    {
+        if (_presenter != null) throw new InvalidOperationException("BootTimeline 已连接呈现下游");
+        _presenter = presenter ?? throw new ArgumentNullException(nameof(presenter));
+    }
 
     private readonly Func<long> _engineMsec;
     private readonly Func<long> _swTicks;
@@ -158,11 +164,11 @@ internal sealed class BootTimeline
             step ?? _current.Step,
             detail ?? _current.Detail,
             forceDraw);
-        Presenter?.Invoke(_current);
+        _presenter?.Invoke(_current);
     }
 
     internal void Replay(bool forceDraw = true) =>
-        Presenter?.Invoke(_current with { ForceDraw = forceDraw });
+        _presenter?.Invoke(_current with { ForceDraw = forceDraw });
 
     /// <summary>
     /// 纯日志事件:只更新细节文案,不推进任何进度(overall/local 原样)、不记 span、
@@ -172,7 +178,7 @@ internal sealed class BootTimeline
     {
         if (Frozen) return;
         _current = _current with { Detail = text, ForceDraw = false };
-        Presenter?.Invoke(_current);
+        _presenter?.Invoke(_current);
     }
 
     // ---- 写入口:钩子上报事实 ----

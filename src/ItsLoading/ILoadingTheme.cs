@@ -38,25 +38,24 @@ internal readonly record struct LoadingViewState(
 }
 #nullable restore
 
-// ---------------------------------------------------------------- 主题接口
+// ---------------------------------------------------------------- Godot 呈现 adapter
 //
-// 主题 = 加载指示器的一种呈现,挂在 BootTimeline.Presenter 上:
-//   Build   —— Init 里建 UI(直接挂 Root;同步突发期禁 Container/deferred)
-//   Present —— 即 Presenter 目标;调用密度 = 真实加载活动密度
+// Godot adapter 经 SurfaceRouter 消费 LoadingFrame:
+//   Present —— 唯一动态输入;调用密度 = 真实加载活动密度
 //   Retire  —— 菜单就绪 + 2s 停留后由编排层调用;gd splash 的 takeover 不归主题管
 // 刻度数学、span 记录全部在 BootTimeline —— 主题只管"长什么样"。
 // 实现只有 GdBridgeBar:正常路径桥接帧 0 autoload 节点;首装/版本过渡/
 // 旧视图已关闭走晚期托管(同一份 gd 主题代码,见 render/boot.gd 与 BootSplash)。
 
-/// <summary>加载指示器主题接口。</summary>
+/// <summary>已挂载的 Godot 基础呈现面；主题本身由 theme.json 定义。</summary>
 #nullable enable
-internal interface ILoadingTheme
+internal interface IGodotSurface
 {
-    /// <summary>建立 UI(在 Init 的 build bar 步骤调用;此时 BootSplash.Install 已完成)。</summary>
-    void Build();
+    /// <summary>呈现一次完整不可变帧。</summary>
+    void Present(LoadingFrame frame);
 
-    /// <summary>呈现一次完整不可变快照(snap = 共用视图模型,见 LoadingPresentation)。</summary>
-    void Present(LoadingViewState state, PresentedSnapshot snap);
+    /// <summary>切换 standby 可见性；不销毁节点，供 native 接管与恢复。</summary>
+    void SetVisible(bool visible);
 
     /// <summary>移除:置死亡标志(挡住移除后仍可能触发的 postfix)+ 释放自身节点。</summary>
     void Retire();
@@ -116,6 +115,21 @@ internal static class ThemeRegistry
         if (!IsValidId(id)) return false;
         try
         {
+            string? themeDir = ThemePacks.DirOf(id);
+            if (themeDir == null)
+            {
+                Log.Warn($"[ItsLoading] theme '{id}' is not installed");
+                return false;
+            }
+            ThemePlan? plan = ThemeCompiler.Compile(themeDir, warning => Log.Warn(warning));
+            if (plan == null)
+            {
+                Log.Warn($"[ItsLoading] theme '{id}' did not compile; selection unchanged");
+                return false;
+            }
+            if (!plan.SupportsNative)
+                Log.Warn($"[ItsLoading] theme '{id}' is Godot-only: "
+                    + string.Join("; ", plan.NativeIncompatibilities));
             string path = ProjectSettings.GlobalizePath(ThemeCfgPath);
             WriteCfgValue(path, "Theme", id, TryReadText(path));
             Log.Warn($"[ItsLoading] theme '{id}' selected (applies from next launch)");
@@ -129,8 +143,8 @@ internal static class ThemeRegistry
     }
 
     /// <summary>
-    /// (Beta)原生加载屏渲染器开关(默认开)。关 = 完全走旧 gd+C# 路径:
-    /// 不创建 FreezeScreen,连冻结期的原生细条也不出现 —— 原生路径的整体逃生舱,
+    /// (Beta)原生加载屏渲染器开关(默认开)。关 = 全程走 Godot 基础路径:
+    /// 不向 SurfaceRouter 提供 native factory,冻结期也保持 Godot 基础路径 —— 原生路径的整体逃生舱,
     /// 排障时可一键回到改动前行为。仅 C# 消费(gd 侧永远不需要)。
     /// </summary>
     internal static bool NativeRendererEnabled() =>

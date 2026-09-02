@@ -286,7 +286,7 @@ internal static class BootSplash
                     }
                 });
             }
-            Log.Warn(ItsLoading.Theme is GdBridgeBar
+            Log.Warn(ItsLoading.GodotSurface is GdBridgeBar
                 ? "[ItsLoading] gd boot view retained as the active loading UI"
                 : "[ItsLoading] autoload node present but not hosting (late host active)");
         }

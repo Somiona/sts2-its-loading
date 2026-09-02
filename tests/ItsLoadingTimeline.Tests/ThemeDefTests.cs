@@ -76,6 +76,8 @@ public sealed class ThemeDefTests
         var fox = def.Elements.OfType<SpriteElement>().Single();
         Assert.Equal(28, fox.Frames);
         Assert.Equal(151, fox.FrameW);
+        Assert.Equal(8, fox.Fps);
+        Assert.Equal(1, fox.Activity!.FramesPerUpdate);
         var version = def.Elements.OfType<VersionLabelElement>().Single();
         Assert.Equal("It's Loading v", version.Prefix);
         Assert.Equal(2, version.Align);
@@ -141,7 +143,7 @@ public sealed class ThemeDefTests
         var warns = new System.Collections.Generic.List<string>();
         var def = ThemeDef.Parse("""
             {"format": 1, "elements": [
-              {"id": "row", "type": "icon_row", "count": 3, "size": 10, "gap": 2, "cx": 100, "cy": 50},
+              {"id": "row", "type": "icon_row", "count": 3, "size": 10, "gap": 2, "cx": 100, "cy": 50, "src": "x.png"},
               {"id": "d1", "type": "dots", "of": "row", "scale": 0.2, "color": "#808080", "cy": 50},
               {"id": "d2", "type": "dots", "of": "ghost", "scale": 0.2, "color": "#808080", "cy": 50},
               {"id": "row", "type": "strip", "h": 10},
@@ -198,5 +200,29 @@ public sealed class ThemeDefTests
         var warns = new System.Collections.Generic.List<string>();
         Assert.Null(ThemeDef.Load(Path.Combine(RepoRoot(), "src", "ItsLoading", "themes", "no-such-theme"), warns.Add));
         Assert.Single(warns);
+    }
+
+    [Fact]
+    public void Invalid_component_invariants_are_rejected_before_rendering()
+    {
+        var warnings = new System.Collections.Generic.List<string>();
+        var def = ThemeDef.Parse("""
+            {"format": 1, "elements": [
+              {"id":"bg", "type":"bg", "color":"#000000ff"},
+              {"id":"row", "type":"icon_row", "count":0, "size":32, "gap":0,
+               "cx":100, "cy":100, "pattern":"icon_%d.png", "index_base":1},
+              {"id":"log", "type":"log_rows", "bind":"log", "x":0, "y":0,
+               "w":100, "lines":3, "per_line":0, "line_h":12, "font":10,
+               "color":"#ffffffff", "align":9},
+              {"id":"sprite", "type":"sprite", "src":"x.png", "x":0, "y":0,
+               "w":10, "h":10, "frame_w":10, "frame_h":10, "frames":2, "fps":1,
+               "activity":{"frames_per_update":0}}
+            ]}
+            """, warnings.Add);
+
+        Assert.NotNull(def);
+        Assert.Single(def!.Elements);
+        Assert.IsType<BgElement>(def.Elements[0]);
+        Assert.Equal(3, warnings.Count);
     }
 }

@@ -25,7 +25,8 @@
       "color": "#ffffffff" },
     { "id": "fox", "type": "sprite", "src": "fox_running.png",
       "x": 693, "y": 322, "w": 151, "h": 128,
-      "frame_w": 151, "frame_h": 128, "frames": 28, "fps": 12, "nearest": true },
+      "frame_w": 151, "frame_h": 128, "frames": 28, "fps": 8, "nearest": true,
+      "activity": { "frames_per_update": 1 } },
     { "id": "version", "type": "version_label", "prefix": "It's Loading v",
       "x": 544, "y": 454, "w": 300, "h": 16, "font": 12,
       "color": "#ffffffcc", "align": 2 }

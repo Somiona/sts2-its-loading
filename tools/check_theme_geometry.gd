@@ -148,6 +148,10 @@ func _check_theme(kit: GDScript, id: String) -> void:
 		_check_row_markers(str(row_id), el["rows"][row_id], el["geoms"][row_id])
 	if el["mask"] != null:
 		_check_mask_domain(el["mask"])
+	if id == "gachathespire":
+		_check_gacha_contract(el)
+	if id == "minespire":
+		_check_minespire_motion(theme, el)
 	theme.theme_retire()  # 冒烟:retire 后 apply 静默
 	theme.theme_apply({"overall": 1.0, "local": 1.0, "indeterminate": false,
 		"t": 0.0, "stage": 7, "stage_changed": false, "step": "", "detail": "",
@@ -193,6 +197,43 @@ func _check_mask_domain(mask) -> void:
 	var seg_b: float = mats[0].get_shader_parameter("seg_b")
 	if seg_a < -0.01 or seg_b > 1.01 or seg_b < seg_a - 0.01:
 		_fail("蒙版段 [%s, %s] 越出轨分数域 [0, 1]" % [seg_a, seg_b])
+
+
+# 双 adapter 合约的 Godot 端：pattern 必须加载真实贴图、slot 保持分散、
+# log_rows 省略 align 时必须落为居中。native 端由 MacLayerSurfaceTests 镜像。
+func _check_gacha_contract(el: Dictionary) -> void:
+	for row_id in ["row1", "row2"]:
+		var row: Array = el["rows"].get(row_id, [])
+		if row.size() != 7:
+			_fail("gachathespire/%s 应有 7 个 slot" % row_id)
+			continue
+		var xs := {}
+		for slot in row:
+			xs[snappedf(slot.position.x, 0.01)] = true
+			if not slot is TextureRect or slot.texture == null:
+				_fail("gachathespire/%s pattern 未加载真实贴图" % row_id)
+		if xs.size() != 7:
+			_fail("gachathespire/%s slot 水平位置发生重叠" % row_id)
+	var log_window = el["logs"].get("log")
+	if log_window == null:
+		_fail("gachathespire/log 缺失")
+		return
+	var labels: Array = log_window.get("_labels")
+	if labels.is_empty() or labels[0].horizontal_alignment != HORIZONTAL_ALIGNMENT_CENTER:
+		_fail("gachathespire/log_rows 默认值不是居中")
+
+
+func _check_minespire_motion(theme, el: Dictionary) -> void:
+	var fox = el["sprites"].get("fox")
+	if fox == null or float(el["sprite_activity"].get("fox", 0.0)) != 1.0:
+		_fail("minespire/fox activity plan 未建立")
+		return
+	var before: float = fox.get("_elapsed")
+	theme.theme_apply({"overall": 0.5, "local": 0.5, "indeterminate": false,
+		"t": 0.0, "stage": 2, "stage_changed": false, "step": "", "detail": "",
+		"log_entries": [], "activity_serial": 1})
+	if float(fox.get("_elapsed")) <= before:
+		_fail("minespire/fox 未响应新的 activity_serial")
 
 
 func _txt(key: String) -> String:

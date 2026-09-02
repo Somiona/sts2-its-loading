@@ -7,10 +7,20 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
+  <Import Project="../../src/ItsLoading/Sts2PathDiscovery.props" />
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <!-- CALayer adapter 回归会真正执行 MacLayerSurface，测试进程需要游戏侧运行时依赖。 -->
+  <ItemGroup>
+    <Reference Include="GodotSharp" HintPath="$(Sts2DataDir)/GodotSharp.dll" Private="true" />
+    <Reference Include="sts2" HintPath="$(Sts2DataDir)/sts2.dll" Private="true" />
+    <Reference Include="0Harmony" HintPath="$(Sts2DataDir)/0Harmony.dll" Private="true" />
+    <Reference Include="Sentry" HintPath="$(Sts2DataDir)/Sentry.dll" Private="true" />
   </ItemGroup>
 
   <ItemGroup>

@@ -20,8 +20,8 @@
 #     mask_track  {members: [<icon_row/dots id>…], tint, bind:"local", indeterminate}
 #                 (轨分数域 = 首个 icon_row 成员的行几何;副本 tint 规则:
 #                  icon 成员 = tint, dots 成员 = dots.color × tint)
-#     sprite      {src, x, y, w, h, frame_w, frame_h, frames, fps, nearest}
-#                 (frame_* 是素材像素尺寸,不随设计矩形缩放;缺素材整元素跳过)
+#     sprite      {src, x, y, w, h, frame_w, frame_h, frames, fps, nearest, activity?}
+#                 (activity:{frames_per_update}按数据活动额外推进;基础 fps 始终自主播放)
 #     log_column  {x, y, lines, line_h, font, color, bind:"log"}
 #     log_rows    {x, y, w, lines, per_line, sep, line_h, font, color, align?, overrun?}
 #   bind ∈ {overall, local, stage, step, detail, log, version}
@@ -51,6 +51,9 @@ var _dot_rects := {}     # id -> Array[Rect2]
 var _dot_colors := {}    # id -> Color(蒙版副本 tint 用)
 var _mask                # kit.MaskFill
 var _mask_ind := {}      # mask_track 的 indeterminate 参数(apply 用)
+var _sprites := {}       # id -> kit.SpriteAnimator(自主时钟)
+var _sprite_activity := {} # id -> 每次数据更新额外推进帧数
+var _last_activity_serial := 0
 var _retired := false
 var _ok := false
 
@@ -220,17 +223,26 @@ func theme_apply(snap: Dictionary) -> void:
 		_labels[id_].text = str(snap.get(str(_label_binds[id_]), ""))
 	for id_ in _logs:
 		_logs[id_].render(snap.log_entries)
+	var activity_serial := int(snap.get("activity_serial", 0))
+	if activity_serial > _last_activity_serial:
+		var updates := activity_serial - _last_activity_serial
+		for id_ in _sprite_activity:
+			_sprites[id_].advance(float(_sprite_activity[id_]) * updates)
+	_last_activity_serial = activity_serial
 
 
 func theme_retire() -> void:
 	_retired = true
+	for sprite in _sprites.values():
+		sprite.stopped = true
 
 
 # ---------------------------------------------------------------- 观测面(工具只读这里)
 
 func inspect() -> Dictionary:
 	return {"bars": _bars, "labels": _labels, "logs": _logs,
-		"rows": _rows, "geoms": _row_geoms, "mask": _mask, "enlarge": _enlarge}
+		"rows": _rows, "geoms": _row_geoms, "mask": _mask, "enlarge": _enlarge,
+		"sprites": _sprites, "sprite_activity": _sprite_activity}
 
 
 # ---------------------------------------------------------------- 元素构建
@@ -345,12 +357,17 @@ func _build_element(e: Dictionary, ctx: Dictionary, parents: Dictionary) -> void
 			_mask_ind = e.get("indeterminate", {})
 		"sprite":
 			var p3: Vector2 = _pt(float(e.get("x", 0.0)), float(e.get("y", 0.0)))
-			_kit.sprite(parent, {
+			var animator = _kit.sprite(parent, {
 				"file": _asset(e.get("src", ""), ctx),
 				"rect": Rect2(p3, Vector2(_sc(float(e.get("w", 0.0))), _sc(float(e.get("h", 0.0))))),
 				"frame_w": float(e.get("frame_w", 0.0)), "frame_h": float(e.get("frame_h", 0.0)),
 				"frames": int(e.get("frames", 1)), "fps": float(e.get("fps", 12.0)),
 				"nearest": bool(e.get("nearest", true))})
+			if animator != null:
+				_sprites[id_] = animator
+				var activity = e.get("activity", {})
+				if activity is Dictionary and activity.has("frames_per_update"):
+					_sprite_activity[id_] = float(activity["frames_per_update"])
 		"log_column":
 			var p4: Vector2 = _pt(float(e.get("x", 0.0)), float(e.get("y", 0.0)))
 			_logs[id_] = _kit.log_column(parent, {

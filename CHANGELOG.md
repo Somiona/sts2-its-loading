@@ -7,6 +7,16 @@ changenote 随版本号发出,上传成功后自动把该区改标为发布的�
 
 ## Unreleased
 
+- 加载画面现在进入最后一个大阶段时就开始统一淡出,但会等到菜单安全点才释放原生资源,避免与仍在工作的渲染线程争用喵
+  - The loading screen now starts its shared fade as soon as the final major stage begins while retaining native resources until the menu-safe disposal point to avoid racing active render workers nya
+- 原生精灵与循环进度现在交给 Core Animation 自主播放,没有数据更新也不会卡住;狐狸还能按加载事件密度在基础跑速上自然加速喵
+  - Native sprites and indeterminate progress now animate autonomously through Core Animation instead of freezing between data updates; the fox also speeds up naturally with loading-event density nya
+- 修复了 macOS 原生画面透明度的 float ABI 错误；淡出与销毁现在由渲染路由统一提供，所有主题默认拥有相同退场效果喵
+  - Fixed the macOS native opacity float-ABI bug; fade-out and teardown now belong to the render router, giving every theme the same default exit effect nya
+- 加载画面改成严格单向数据流:进度只经 LoadingFrame 流入统一路由,Godot 是基础路径,native 成功首帧后才接管,失败会无重建地恢复 Godot 喵
+  - The loading screen now follows a strict one-way data flow: progress reaches a single router through LoadingFrame, Godot is the baseline path, and native takes over only after a successful first frame with rebuild-free Godot fallback nya
+- 修好了 GachaTheSpire 原生画面的图标加载、阶段图标重叠、进度蒙版错位和日志未居中,主题编译器现在会统一展开资源与跨元素几何喵
+  - Fixed GachaTheSpire native icon loading, overlapping stage icons, misplaced progress masks and left-aligned logs; the theme compiler now resolves assets and cross-element geometry consistently nya
 - 任何人都能做主题啦:一份 theme.json 纯数据就是一个主题包,以普通 mod 的形式发布;启动画面、冻结期原生渲染与画廊预览共用同一份声明,零代码零编译喵
   - Anyone can make a theme now: one pure-data theme.json shipped as an ordinary mod ("theme pack") drives the boot splash, the freeze-phase native renderer, and the gallery preview from the same declaration — no code, no compiling nya
 - 设置里新增主题画廊:列出全部已装主题并实时预览,点 Apply 下次启动生效,原来的下拉框退役喵

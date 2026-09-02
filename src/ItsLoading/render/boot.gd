@@ -13,7 +13,7 @@
 #   theme_retire()     停自身动画;可见性(淡出/立即隐藏)归本节点
 #
 # 桥协议(与 C# GdBridgeBar 成对,破坏性变更双侧同步升版本):
-#   csharp_attach() / csharp_present(overall, local, stage, step, detail) /
+#   csharp_attach() / csharp_present(overall, local, stage, step, detail) / csharp_set_visible() /
 #   takeover() / show_hint(text) / bridge_version(实例变量)/ _done(关闭标志,C# 探测读)
 #   可选方法(C# 经 HasMethod 探测,旧脚本缺席即跳过,新增不升版):
 #   replay_boot_log() / get_workshop_log()
@@ -43,7 +43,7 @@ const LOG_STREAM_CAP := 60  # 活动流上限(窗口淘汰归各主题的 LogWin
 const SMOOTH_SPEED := 5.0
 const BRIDGE_WATCHDOG_MSEC := 300000  # 仅兜底 C# 中途死亡;须远高于合法的慢云同步/慢 mod 启动
 
-var bridge_version := 11
+var bridge_version := 12
 
 # ---- 前奏(工坊扫描)状态 ----
 var boot_start_msec := 0  # C# Handoff 读取的引擎启动锚点
@@ -80,6 +80,7 @@ var _elapsed := 0.0
 var _step_text := ""
 var _detail_text := ""
 var _log_lines: Array = []  # 活动流(已去重已格式化;渲染窗口归主题)
+var _activity_serial := 0    # 每次 C# 数据呈现递增；自然帧只读取，不重复触发
 var _nan_count := 0         # NaN 入口哨兵计数(移除时的摘要行消费;正常恒 0)
 var _last_log := ""
 # ---- 自检/清理 ----
@@ -262,6 +263,7 @@ func _apply() -> void:
 		"step": _step_text,
 		"detail": _detail_text,
 		"log_entries": _log_lines,
+		"activity_serial": _activity_serial,
 	})
 
 
@@ -702,7 +704,7 @@ func show_hint(text: String) -> void:
 	t.timeout.connect(func() -> void: l.queue_free())
 
 
-# 全程呈现(v11):step_text 已含阶段包装、log 为全量流(含前奏行)——
+# 全程呈现(v12):step_text 已含阶段包装、log 为全量流(含前奏行)——
 # 两者由 C# 侧 LoadingPresentation 统一产出,本侧只做平滑与渲染。
 # log 非空才替换(空 = C# 侧检测未变,沿用上次);_done/主题未建时静默丢弃。
 func csharp_present(overall: float, local: float, stage: int,
@@ -710,6 +712,7 @@ func csharp_present(overall: float, local: float, stage: int,
 	if _done or _theme_node == null:
 		return
 	_bridge_last_present_msec = Time.get_ticks_msec()
+	_activity_serial += 1
 	# NaN 入口哨兵:clampf 拦不住 NaN,NaN 进原生布局会让渲染错乱;
 	# 报错一次 + 计数,移除时的摘要行消费
 	if is_nan(overall) or is_nan(local):
@@ -737,6 +740,12 @@ func csharp_present(overall: float, local: float, stage: int,
 	if log is Array and log.size() > 0:
 		_log_lines = log
 	_apply()
+
+
+# native 接管时只隐藏、不销毁，保留为同一主题与 LoadingFrame 的 standby。
+func csharp_set_visible(visible: bool) -> void:
+	if _layer != null:
+		_layer.visible = visible
 
 
 func takeover() -> void:

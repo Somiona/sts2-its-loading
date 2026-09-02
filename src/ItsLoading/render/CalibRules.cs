@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 
+#nullable enable
+
 namespace ItsLoading;
 
 /// <summary>
@@ -23,27 +25,25 @@ internal static class CalibRules
 {
     internal readonly record struct Box(string Id, double X, double Y, double W, double H);
 
-    internal static List<Box> Boxes(ThemeDef def)
+    internal static List<Box> Boxes(ThemePlan plan)
     {
-        var rowsById = new Dictionary<string, IconRowElement>();
-        foreach (var e in def.Elements)
-            if (e is IconRowElement r) rowsById[e.Id] = r;
-
         var outBoxes = new List<Box>();
-        foreach (var e in def.Elements)
+        foreach (var e in plan.Elements)
         {
             double[]? rect = e switch
             {
                 BgElement or StripElement or DotsElement => null, // bg=画布边框;strip=容器;dots 由行框覆盖
-                MaskTrackElement m => FirstRowRect(m, rowsById),
+                MaskTrackElement m when plan.Masks.TryGetValue(m.Id, out var mask)
+                    => Rect(mask.Domain),
                 LabelElement l => Text(l.X, l.Y, l.W, l.H, l.Font),
                 VersionLabelElement v => Text(v.X, v.Y, v.W, v.H, v.Font),
                 LogoElement g => new[] { g.X, g.Y, g.W, g.W * 0.3 },
                 BarElementDef b => new[]
                 {
-                    b.X, b.Y, b.W.IsFill ? def.Space.W - 2 * b.X : b.W.Value, b.H,
+                    b.X, b.Y, b.W.IsFill ? plan.Space.W - 2 * b.X : b.W.Value, b.H,
                 },
-                IconRowElement r => Row(r),
+                IconRowElement r when plan.Rows.TryGetValue(r.Id, out var row)
+                    => Rect(row.Bounds),
                 SpriteElement s => new[] { s.X, s.Y, s.W, s.H },
                 LogColumnElement lc => new[] { lc.X, lc.Y, 240.0, lc.Lines * lc.LineH },
                 LogRowsElement lr => new[] { lr.X, lr.Y, lr.W, lr.Lines * lr.LineH },
@@ -54,20 +54,8 @@ internal static class CalibRules
         return outBoxes;
     }
 
-    private static double[]? FirstRowRect(MaskTrackElement m, Dictionary<string, IconRowElement> rows)
-    {
-        foreach (var member in m.Members)
-            if (rows.TryGetValue(member, out var r)) return Row(r);
-        return null;
-    }
-
     private static double[] Text(double x, double y, double? w, double? h, double font) =>
         new[] { x, y, w ?? 240.0, h ?? font * 1.4 + 6.0 };
 
-    private static double[] Row(IconRowElement r)
-    {
-        double span = r.Count * r.Size + (r.Count - 1) * r.Gap;
-        double top = (r.Bottom ?? (r.Cy ?? 0) + r.Size / 2) - r.Size;
-        return new[] { r.Cx - span / 2, top, span, r.Size };
-    }
+    private static double[] Rect(ThemeRect rect) => new[] { rect.X, rect.Y, rect.W, rect.H };
 }

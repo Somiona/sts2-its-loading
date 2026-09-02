@@ -18,14 +18,14 @@ namespace ItsLoading;
 //      boot.gd,attach 新实例。三种情况主题显示都不受影响。
 //
 // 协议(与 render/boot.gd 成对,破坏性变更双侧同步升版本):
-//   csharp_attach() / csharp_present(overall, local, stage, step, detail) /
+//   csharp_attach() / csharp_present(overall, local, stage, step, detail) / csharp_set_visible() /
 //   takeover() / show_hint(text) —— 桥接后调用
 //   bridge_version(实例变量,Get 读取)—— 精确版本协商
 //   _done(实例变量,Get 读取)—— 关闭标志,探测用
 // 移除:本类拥有所宿节点 —— Retire 直接对它调 takeover()(淡出或立即隐藏由 gd 决定)。
-internal sealed class GdBridgeBar : ILoadingTheme
+internal sealed class GdBridgeBar : IGodotSurface
 {
-    internal const int BridgeVersion = 11;
+    internal const int BridgeVersion = 12;
 
     private readonly Godot.Node _node;
     private readonly bool _lateHosted;
@@ -114,7 +114,8 @@ internal sealed class GdBridgeBar : ILoadingTheme
         return v.VariantType == Variant.Type.Int
             && VersionCompatible(v.AsInt32())
             && node.HasMethod("csharp_attach")
-            && node.HasMethod("csharp_present");
+            && node.HasMethod("csharp_present")
+            && node.HasMethod("csharp_set_visible");
     }
 
     /// <summary>旧视图可能已被自身安全网提前关闭(隐藏但节点还在)——关闭了就不复用。</summary>
@@ -132,7 +133,7 @@ internal sealed class GdBridgeBar : ILoadingTheme
     }
 
     /// <summary>接管:通知 gd 停前奏轮询(不隐藏不替换节点);首次注入时挂提示。</summary>
-    public void Build()
+    private void Build()
     {
         _node.Call("csharp_attach");
         if (BootSplash.InjectedThisRun && _node.HasMethod("show_hint"))
@@ -154,30 +155,36 @@ internal sealed class GdBridgeBar : ILoadingTheme
     private string _lastLogTail = "";
 
     /// <summary>
-    /// 转发共用视图模型到 gd 节点(v11):StepText 已含阶段包装,日志发全量流
+    /// 转发共用视图模型到 gd 节点(v12):StepText 已含阶段包装,日志发全量流
     /// (含前奏行)。日志变更检测(计数+尾行)避免逐帧 marshal 60 条字符串;
     /// 空数组 = 未变,gd 侧沿用上次。forceDraw 时在 C# 侧配对强制出帧。
     /// </summary>
-    public void Present(LoadingViewState state, PresentedSnapshot snap)
+    public void Present(LoadingFrame frame)
     {
         if (_dead || !GodotObject.IsInstanceValid(_node)) return;
         _presents++;
         ItsLoading.Run("bridge present", () =>
         {
             var log = new Godot.Collections.Array<string>();
-            bool changed = snap.Log.Count != _lastLogCount
-                || (snap.Log.Count > 0 && snap.Log[^1] != _lastLogTail);
+            bool changed = frame.Log.Count != _lastLogCount
+                || (frame.Log.Count > 0 && frame.Log[^1] != _lastLogTail);
             if (changed)
             {
-                foreach (var line in snap.Log) log.Add(line);
-                _lastLogCount = snap.Log.Count;
-                _lastLogTail = snap.Log.Count > 0 ? snap.Log[^1] : "";
+                foreach (var line in frame.Log) log.Add(line);
+                _lastLogCount = frame.Log.Count;
+                _lastLogTail = frame.Log.Count > 0 ? frame.Log[^1] : "";
             }
             _node.Call("csharp_present",
-                state.Overall, state.Local, (int)state.Stage,
-                snap.StepText, snap.DetailText, log);
-            if (state.ForceDraw) RenderingServer.ForceDraw();
+                frame.Overall, frame.Local, (int)frame.Stage,
+                frame.StepText, frame.DetailText, log);
+            if (frame.ForceDraw) RenderingServer.ForceDraw();
         });
+    }
+
+    public void SetVisible(bool visible)
+    {
+        if (_dead || !GodotObject.IsInstanceValid(_node)) return;
+        _node.Call("csharp_set_visible", visible);
     }
 
     /// <summary>
@@ -188,7 +195,7 @@ internal sealed class GdBridgeBar : ILoadingTheme
     /// </summary>
     public void Retire()
     {
-        if (_dead) return; // 原生接管时已退过一次(onAttach),RetireBar 的二次调用幂等
+        if (_dead) return; // 重复 retire 幂等；native 接管只隐藏本节点，不会提前置死
         _dead = true;
         ItsLoading.Run("dismiss boot view", () => _node.Call("takeover"));
         string theme = _node.Get("_theme_id").AsString();

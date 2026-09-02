@@ -6,11 +6,13 @@ using System.Runtime.InteropServices;
 using System.Text;
 using MegaCrit.Sts2.Core.Logging;
 
+#nullable enable
+
 namespace ItsLoading;
 
 /// <summary>
-/// 冻结窗口的原生呈现面(macOS 适配):按 ThemeDef(与 gd interpreter 同一份
-/// theme.json)在游戏 CAMetalLayer 下挂 CALayer 子树渲染完整主题,绕过 Godot
+/// 冻结窗口的原生呈现面(macOS 适配):按 ThemePlan 在游戏 CAMetalLayer 下挂
+/// CALayer 子树渲染完整主题,绕过 Godot
 /// 渲染管线由 Core Animation 渲染服务器直接合成 —— 冻结期(Metal swapchain
 /// acquire 静默失败、blit 全跳过)也能更新,帧恢复后继续拥有像素直到 retire。
 ///
@@ -19,15 +21,17 @@ namespace ItsLoading;
 ///     正是 Apple 对「runloop 阻塞」场景的文档化姿势,主线程改 layer 树合法;
 ///   · Godot 侧呈现在启动突发期全部不上屏(合成器留存 boot logo 帧)——
 ///     原生面是冻结期唯一可见通道,故帧恢复后不退场(活跃模式)。
-/// ThemeDef 缺失/构建异常 → 细条兜底(最小诊断呈现面)。窗口 resize
+/// ThemePlan 缺失/构建异常 → 细条兜底(最小诊断呈现面)。窗口 resize
 /// (logo-play)经边界监视触发整体重排。诊断开关 ITSLOADING_PROBE_LAYER=1。
 /// 坐标:CALayer 底左原点 ↔ Godot 顶左原点,y 翻转统一在 MapY/MapRel。
-/// 诚实近似(与 gd 渲染的差异):CATextLayer 系统字体 ≠ Godot 字体;
-/// mask 副本暗化 = 半透明黑底叠加(灰阶素材下 ≈ 乘法)。
+/// 诚实差异:CATextLayer 系统字体 ≠ Godot 字体；灰阶 mask 以素材 alpha 遮罩暗层。
 /// </summary>
 internal sealed class MacLayerSurface : IThemeSurface
 {
-    private readonly ThemeDef? _def;
+    private const string SpriteLoopKey = "itsloading.sprite.loop";
+    private const string IndeterminatePositionKey = "itsloading.indeterminate.position";
+    private const string IndeterminateWidthKey = "itsloading.indeterminate.width";
+    private readonly ThemePlan? _plan;
     private readonly string _themeDir;
     private readonly Func<string, string> _txt;
     private readonly string _version;
@@ -40,8 +44,6 @@ internal sealed class MacLayerSurface : IThemeSurface
 
     // 空间映射:design → 等比缩放居中;screen → 恒等
     private double _scale = 1, _ox, _oy;
-    private double _overlayTop;                // 层顶部被标题栏/菜单栏覆盖的带高
-
     // 元素运行时
     private readonly List<IntPtr> _statics = new();
     private readonly List<TextNode> _labels = new();
@@ -70,6 +72,7 @@ internal sealed class MacLayerSurface : IThemeSurface
         public ThemeBind Bind;
         public double TrackW, TrackH, Inset, FillY, FillH;
         public IndeterminateDef? Ind;
+        public bool Animating;
     }
 
     private sealed class RowNode
@@ -85,6 +88,7 @@ internal sealed class MacLayerSurface : IThemeSurface
         public IntPtr MaskLayer;
         public double SpanS, HeightS;
         public IndeterminateDef Ind = new();
+        public bool Animating;
     }
 
     private sealed class SpriteNode
@@ -93,6 +97,7 @@ internal sealed class MacLayerSurface : IThemeSurface
         public double SheetW, SheetH, FrameW, FrameH;
         public int Frames;
         public double Fps;
+        public double ActivityFrames, ActivityOffset;
     }
 
     private sealed class LogNode
@@ -107,10 +112,10 @@ internal sealed class MacLayerSurface : IThemeSurface
 
     private readonly bool _calib;
 
-    internal MacLayerSurface(ThemeDef? def, string themeDir, string version,
+    internal MacLayerSurface(ThemePlan? plan, string themeDir, string version,
         Func<string, string>? txt = null, bool calib = false)
     {
-        _def = def;
+        _plan = plan;
         _themeDir = themeDir;
         _version = version;
         _txt = txt ?? (k => k);
@@ -178,7 +183,7 @@ internal sealed class MacLayerSurface : IThemeSurface
 
     // drawableSize 只对 CAMetalLayer 家族存在;无守卫调用 = SIGABRT(实证)
 
-    public void Present(SurfaceView view)
+    public void Present(LoadingFrame view)
     {
         if (!_built) return;
         // 边界监视:logo-play 的窗口 resize → 整体重排。全屏过渡时游戏可能
@@ -220,28 +225,27 @@ internal sealed class MacLayerSurface : IThemeSurface
         {
             UpdateBars(view);
             UpdateLabels(view);
-            if (view.Snap.StageChanged) UpdateRows(view);
+            if (view.StageChanged) UpdateRows(view);
             UpdateMask(view);
             UpdateLogs(view);
-            UpdateSprites(view);
+            AdvanceActiveSprites();
         });
     }
 
 
-    public void Remove(string why)
-    {
-        // 两段式退场:Remove 只是标记;淡出经 SetOpacity 步进,Teardown 才硬拆
-    }
-
     public void SetOpacity(double opacity)
     {
         if (!_built || _root == IntPtr.Zero) return;
-        Transaction(() => ObjcVoidD(_root, Sel("setOpacity:"), Math.Clamp(opacity, 0.0, 1.0)));
+        Transaction(() => ObjcVoidF(_root, Sel("setOpacity:"),
+            (float)Math.Clamp(opacity, 0.0, 1.0)));
     }
 
     public void Teardown()
     {
         TeardownLayers();
+        foreach (IntPtr image in _images.Values)
+            if (image != IntPtr.Zero) CfRelease(image);
+        _images.Clear();
         _built = false;
     }
 
@@ -274,7 +278,7 @@ internal sealed class MacLayerSurface : IThemeSurface
         Transaction(() => SetFrame(_root, Sel("setFrame:"), new CGRect(0, 0, bw, bh)));
         ObjcLayer(_layer, Sel("addSublayer:"), _root);
 
-        if (_def == null)
+        if (_plan == null)
         {
             BuildThinBar(bw, bh);
             if (_calib)
@@ -285,7 +289,7 @@ internal sealed class MacLayerSurface : IThemeSurface
                 });
             return;
         }
-        var space = _def.Space;
+        var space = _plan.Space;
         // (2026-09-02 两次证伪记录:① 子层空间按 drawable → Steam 上下文错误;
         // ② 标题栏覆盖带 → 只会整体缩小,真实病灶是「逐元素不同量的垂直错位」。
         // 保留:bounds 空间 + 等比居中。标定网格见 BuildGrid。)
@@ -300,7 +304,7 @@ internal sealed class MacLayerSurface : IThemeSurface
             _scale = 1;
             _ox = _oy = 0;
         }
-        foreach (var e in _def.Elements)
+        foreach (var e in _plan.Elements)
         {
             try { BuildElement(e); }
             catch (Exception ex)
@@ -308,10 +312,12 @@ internal sealed class MacLayerSurface : IThemeSurface
                 Log.Warn($"[ItsLoading][overlay] element '{e.Id}' skipped: {ex.Message}");
             }
         }
-        if (_calib && _def.Space.IsDesign)
+        // 先完成静态 layer tree，再统一激活自主运动；避免后续构建事务覆盖动画。
+        foreach (SpriteNode sprite in _sprites) InstallSpriteLoop(sprite);
+        if (_calib && _plan.Space.IsDesign)
         {
-            BuildGrid(_def.Space);
-            BuildCalibBoxes(_def);
+            BuildGrid(_plan.Space);
+            BuildCalibBoxes(_plan);
         }
     }
 
@@ -348,9 +354,9 @@ internal sealed class MacLayerSurface : IThemeSurface
     }
 
 
-    private void BuildCalibBoxes(ThemeDef def)
+    private void BuildCalibBoxes(ThemePlan plan)
     {
-        foreach (var b in CalibRules.Boxes(def))
+        foreach (var b in CalibRules.Boxes(plan))
         {
             var boxLayer = NewLayer();
             Transaction(() =>
@@ -442,6 +448,7 @@ internal sealed class MacLayerSurface : IThemeSurface
                 break;
             case IconRowElement row:
             {
+                if (!_plan!.Rows.TryGetValue(row.Id, out IconRowPlan? rowPlan)) break;
                 var node = new RowNode
                 {
                     Id = row.Id,
@@ -452,20 +459,18 @@ internal sealed class MacLayerSurface : IThemeSurface
                     Slots = new IntPtr[row.Count],
                 };
                 for (int i = 0; i < row.Count; i++) node.Slots[i] = IntPtr.Zero;
-                double span = row.Count * row.Size + (row.Count - 1) * row.Gap;
-                double x0 = row.Cx - span / 2;
                 for (int i = 0; i < row.Count; i++)
                 {
-                    string src = row.Src ?? string.Format(row.Pattern ?? "%d", row.IndexBase + i);
+                    ThemeRect slot = rowPlan.Slots[i];
+                    string src = rowPlan.Sources[i];
                     IntPtr img = LoadImage(src);
-                    double topTheme = node.Bottom - row.Size;
-                    double lx = _ox + Sc(x0 + i * (row.Size + row.Gap));
+                    double lx = _ox + Sc(slot.X);
                     if (img != IntPtr.Zero)
-                        node.Slots[i] = AddImageLayer(_root, img, lx, MapY(topTheme, row.Size),
-                            Sc(row.Size), Sc(row.Size), row.Nearest);
+                        node.Slots[i] = AddImageLayer(_root, img, lx, MapY(slot.Y, slot.H),
+                            Sc(slot.W), Sc(slot.H), row.Nearest);
                     else
-                        node.Slots[i] = AddColorLayer(_root, lx, MapY(topTheme, row.Size),
-                            Sc(row.Size), Sc(row.Size),
+                        node.Slots[i] = AddColorLayer(_root, lx, MapY(slot.Y, slot.H),
+                            Sc(slot.W), Sc(slot.H),
                             row.Placeholder ?? new ThemeColor(0.5, 0.5, 0.5, 1));
                 }
                 if (row.Enlarge != null) MarkRowStage(node, 1);
@@ -474,20 +479,15 @@ internal sealed class MacLayerSurface : IThemeSurface
             }
             case DotsElement dots:
             {
-                var row = FindRowDef(dots.Of);
-                if (row == null) break;
-                double sizeTheme = row.Size * dots.Scale;
-                double size = Sc(sizeTheme);
-                double span = row.Count * row.Size + (row.Count - 1) * row.Gap;
-                double x0 = row.Cx - span / 2;
-                for (int j = 0; j < row.Count - 1; j++)
+                if (!_plan!.DotSets.TryGetValue(dots.Id, out DotsPlan? dotPlan)) break;
+                foreach (ThemeRect dot in dotPlan.Dots)
                 {
-                    double cx = x0 + (j + 1) * row.Size + j * row.Gap + row.Gap / 2;
-                    double lx = _ox + Sc(cx) - size / 2;
+                    double size = Sc(dot.W);
                     var l = NewLayer();
                     Transaction(() =>
                     {
-                        SetFrame(l, Sel("setFrame:"), new CGRect(lx, MapY(dots.Cy, sizeTheme), size, size));
+                        SetFrame(l, Sel("setFrame:"), new CGRect(
+                            _ox + Sc(dot.X), MapY(dot.Y, dot.H), size, size));
                         ObjcVoidD(l, Sel("setCornerRadius:"), size / 2);
                         ObjcVoidColor(l, Sel("setBackgroundColor:"), Color(dots.Color));
                     });
@@ -497,13 +497,12 @@ internal sealed class MacLayerSurface : IThemeSurface
             }
             case MaskTrackElement mask:
             {
-                IconRowElement? domain = FirstRowMember(mask);
-                if (domain == null) break;
-                double spanS = Sc(domain.Count * domain.Size + (domain.Count - 1) * domain.Gap);
-                double topTheme = (domain.Bottom ?? 0) - domain.Size;
-                double contX = _ox + Sc(domain.Cx) - spanS / 2;
-                double contH = Sc(domain.Size);
-                double contY = MapY(topTheme, domain.Size);
+                if (!_plan!.Masks.TryGetValue(mask.Id, out MaskTrackPlan? maskPlan)) break;
+                ThemeRect domain = maskPlan.Domain;
+                double spanS = Sc(domain.W);
+                double contX = _ox + Sc(domain.X);
+                double contH = Sc(domain.H);
+                double contY = MapY(domain.Y, domain.H);
 
                 var container = NewLayer();
                 var maskLayer = NewLayer();
@@ -522,37 +521,36 @@ internal sealed class MacLayerSurface : IThemeSurface
                 // dots 成员 = 深灰圆(dot 色 × tint)
                 foreach (var memberId in mask.Members)
                 {
-                    if (_def.Elements.FirstOrDefault(x => x.Id == memberId) is IconRowElement ir)
+                    if (_plan.Rows.TryGetValue(memberId, out IconRowPlan? ir))
                     {
-                        for (int i = 0; i < ir.Count; i++)
+                        for (int i = 0; i < ir.Slots.Count; i++)
                         {
-                            string src = ir.Src ?? string.Format(ir.Pattern ?? "%d", ir.IndexBase + i);
+                            ThemeRect rect = ir.Slots[i];
+                            string src = ir.Sources[i];
                             IntPtr img = LoadImage(src);
-                            double bx = _ox + Sc(RowX0(ir) + i * (ir.Size + ir.Gap)) - contX;
+                            double bx = Sc(rect.X - domain.X);
+                            double by = Sc(domain.H - (rect.Y - domain.Y) - rect.H);
                             if (img != IntPtr.Zero)
-                                AddDarkImageCopy(container, img, bx, 0, Sc(ir.Size), Sc(ir.Size), mask.Tint);
+                                AddDarkImageCopy(container, img, bx, by, Sc(rect.W), Sc(rect.H), mask.Tint);
                             else
-                                AddColorLayer(container, bx, 0, Sc(ir.Size), Sc(ir.Size),
+                                AddColorLayer(container, bx, by, Sc(rect.W), Sc(rect.H),
                                     Half(mask.Tint));
                         }
                     }
-                    else if (_def.Elements.FirstOrDefault(x => x.Id == memberId) is DotsElement dd
-                        && FindRowDef(dd.Of) is { } dr)
+                    else if (_plan.DotSets.TryGetValue(memberId, out DotsPlan? dd))
                     {
-                        double dsize = Sc(dr.Size * dd.Scale);
-                        double dspan = dr.Count * dr.Size + (dr.Count - 1) * dr.Gap;
-                        double dx0 = dr.Cx - dspan / 2;
-                        for (int j = 0; j < dr.Count - 1; j++)
+                        foreach (ThemeRect rect in dd.Dots)
                         {
-                            double cx = dx0 + (j + 1) * dr.Size + j * dr.Gap + dr.Gap / 2;
-                            double lx = _ox + Sc(cx) - dsize / 2 - contX;
-                            double ly = (contH - dsize) / 2;
+                            double dsize = Sc(rect.W);
+                            double lx = Sc(rect.X - domain.X);
+                            double ly = Sc(domain.H - (rect.Y - domain.Y) - rect.H);
                             var l = NewLayer();
                             Transaction(() =>
                             {
                                 SetFrame(l, Sel("setFrame:"), new CGRect(lx, ly, dsize, dsize));
                                 ObjcVoidD(l, Sel("setCornerRadius:"), dsize / 2);
-                                ObjcVoidColor(l, Sel("setBackgroundColor:"), Color(Mul(dd.Color, mask.Tint)));
+                                ObjcVoidColor(l, Sel("setBackgroundColor:"),
+                                    Color(Mul(dd.Element.Color, mask.Tint)));
                             });
                             ObjcLayer(container, Sel("addSublayer:"), l);
                         }
@@ -573,6 +571,7 @@ internal sealed class MacLayerSurface : IThemeSurface
                     Layer = l,
                     SheetW = (double)CGImageGetWidth(img), SheetH = (double)CGImageGetHeight(img),
                     FrameW = spr.FrameW, FrameH = spr.FrameH, Frames = spr.Frames, Fps = spr.Fps,
+                    ActivityFrames = spr.Activity?.FramesPerUpdate ?? 0,
                 });
                 break;
             }
@@ -627,65 +626,50 @@ internal sealed class MacLayerSurface : IThemeSurface
             CGRect r = MapRel(parent, log.X, log.Y + i * log.LineH, wTheme, log.LineH);
             var c = log.Color;
             ThemeColor col = column ? new ThemeColor(c.R, c.G, c.B, ColumnAlpha(i, log.Lines, c.A)) : c;
+            int? align = column ? log.Align : log.Align ?? 1;
             node.Lines[i] = AddTextLayer(parent, "", r.X, r.Y,
-                wTheme == 0 ? _bw : r.Width, r.Height, log.Font, col, log.Align);
+                wTheme == 0 ? _bw : r.Width, r.Height, log.Font, col, align);
         }
         _logs.Add(node);
     }
 
-    private static double RowX0(IconRowElement r) =>
-        r.Cx - (r.Count * r.Size + (r.Count - 1) * r.Gap) / 2;
-
     private IconRowElement? FindRowDef(string id) =>
-        _def?.Elements.FirstOrDefault(x => x.Id == id) as IconRowElement;
-
-    private IconRowElement? FirstRowMember(MaskTrackElement m)
-    {
-        foreach (var id in m.Members)
-            if (FindRowDef(id) is { } r) return r;
-        return null;
-    }
+        _plan?.Elements.FirstOrDefault(x => x.Id == id) as IconRowElement;
 
     // ================================================================ 更新
 
-    private void UpdateBars(SurfaceView v)
+    private void UpdateBars(LoadingFrame v)
     {
         foreach (var b in _bars)
         {
-            double frac = b.Bind == ThemeBind.Overall ? v.Snap.Overall : v.Snap.Local;
+            double frac = b.Bind == ThemeBind.Overall ? v.Overall : v.Local;
             if (double.IsNaN(frac)) frac = 0;
-            double x = b.Inset, w;
-            if (b.Bind == ThemeBind.Local && v.Snap.LocalIndeterminate && b.Ind != null)
+            if (b.Bind == ThemeBind.Local && v.LocalIndeterminate && b.Ind != null)
             {
-                if (b.Ind.Mode == IndeterminateMode.Pulse)
-                {
-                    // classic shimmer:宽度呼吸(三角波),与 kit.pulse_width 同式
-                    double tri = Math.Abs((v.Snap.T * 0.8) % 2.0 - 1.0);
-                    w = Math.Clamp(Sc(b.Ind.MinW) + tri * Sc(b.Ind.Travel), 0, b.TrackW);
-                }
-                else
-                {
-                    double phase = (v.Snap.T / Math.Max(0.1, b.Ind.CycleS)) % 1.0;
-                    w = b.TrackW * 0.25;
-                    x = b.Inset + phase * b.TrackW * 0.75;
-                }
+                if (!b.Animating) StartIndeterminate(b.Fill, b.TrackW, b.FillH,
+                    b.Inset, b.FillY, b.Ind);
+                b.Animating = true;
+                continue;
             }
-            else
+            if (b.Animating)
             {
-                w = Math.Clamp(frac, 0, 1) * b.TrackW;
+                StopIndeterminate(b.Fill);
+                b.Animating = false;
             }
+            double x = b.Inset;
+            double w = Math.Clamp(frac, 0, 1) * b.TrackW;
             SetFrame(b.Fill, Sel("setFrame:"), new CGRect(x, b.FillY, Math.Max(1, w), b.FillH));
         }
     }
 
-    private void UpdateLabels(SurfaceView v)
+    private void UpdateLabels(LoadingFrame v)
     {
         foreach (var t in _labels)
         {
             string text = t.Bind switch
             {
-                ThemeBind.Step => v.Snap.StepText,
-                ThemeBind.Detail => v.Snap.DetailText,
+                ThemeBind.Step => v.StepText,
+                ThemeBind.Detail => v.DetailText,
                 _ => t.Last,
             };
             if (text == t.Last) continue;
@@ -696,10 +680,10 @@ internal sealed class MacLayerSurface : IThemeSurface
         }
     }
 
-    private void UpdateRows(SurfaceView v)
+    private void UpdateRows(LoadingFrame v)
     {
         foreach (var r in _rows)
-            if (r.Factor != 1) MarkRowStage(r, (int)v.State.Stage);
+            if (r.Factor != 1) MarkRowStage(r, (int)v.Stage);
     }
 
     /// <summary>当前阶段放大:底中点锚的放大矩形(CALayer 直接 setFrame,
@@ -707,41 +691,47 @@ internal sealed class MacLayerSurface : IThemeSurface
     private void MarkRowStage(RowNode r, int stage)
     {
         var def = FindRowDef(r.Id);
-        if (def == null) return;
+        if (def == null || !_plan!.Rows.TryGetValue(r.Id, out IconRowPlan? rowPlan)) return;
         int idx = Math.Clamp(stage, 1, r.Slots.Length) - 1;
-        double bottomTheme = def.Bottom ?? (def.Cy ?? 0) + def.Size / 2;
         for (int i = 0; i < r.Slots.Length; i++)
         {
-            double size = Sc(def.Size) * (i == idx ? r.Factor : 1);
-            double cx = _ox + Sc(def.Cx);
-            double bottomY = _bh - _oy - Sc(bottomTheme);
-            SetFrame(r.Slots[i], Sel("setFrame:"), new CGRect(cx - size / 2, bottomY, size, size));
+            ThemeRect slot = rowPlan.Slots[i];
+            double factor = i == idx ? r.Factor : 1;
+            double sizeTheme = def.Size * factor;
+            double size = Sc(sizeTheme);
+            double cxTheme = slot.X + slot.W / 2;
+            double topTheme = def.Pivot == "bottom"
+                ? slot.Y + slot.H - sizeTheme
+                : slot.Y + slot.H / 2 - sizeTheme / 2;
+            SetFrame(r.Slots[i], Sel("setFrame:"), new CGRect(
+                _ox + Sc(cxTheme) - size / 2, MapY(topTheme, sizeTheme), size, size));
         }
     }
 
-    private void UpdateMask(SurfaceView v)
+    private void UpdateMask(LoadingFrame v)
     {
         var m = _mask;
         if (m == null) return;
-        double a, b;
-        if (v.Snap.LocalIndeterminate)
+        if (v.LocalIndeterminate)
         {
-            a = ((v.Snap.T / Math.Max(0.1, m.Ind.CycleS)) % 1.0) * 0.75;
-            b = a + 0.25;
+            if (!m.Animating)
+                StartIndeterminate(m.MaskLayer, m.SpanS, m.HeightS, 0, 0, m.Ind);
+            m.Animating = true;
+            return;
         }
-        else
+        if (m.Animating)
         {
-            double local = double.IsNaN(v.Snap.Local) ? 0 : v.Snap.Local;
-            a = 0;
-            b = Math.Clamp(local, 0, 1);
+            StopIndeterminate(m.MaskLayer);
+            m.Animating = false;
         }
-        double w = Math.Max(0, (b - a) * m.SpanS);
-        SetFrame(m.MaskLayer, Sel("setFrame:"), new CGRect(a * m.SpanS, 0, w, m.HeightS));
+        double local = double.IsNaN(v.Local) ? 0 : v.Local;
+        double w = Math.Clamp(local, 0, 1) * m.SpanS;
+        SetFrame(m.MaskLayer, Sel("setFrame:"), new CGRect(0, 0, w, m.HeightS));
     }
 
-    private void UpdateLogs(SurfaceView v)
+    private void UpdateLogs(LoadingFrame v)
     {
-        var entries = v.Snap.Log;
+        var entries = v.Log;
         foreach (var node in _logs)
         {
             if (entries.Count == node.LastCount && (entries.Count == 0 || entries[^1] == node.LastTail))
@@ -786,16 +776,112 @@ internal sealed class MacLayerSurface : IThemeSurface
         return string.Join(node.Sep, parts);
     }
 
-    private void UpdateSprites(SurfaceView v)
+    private void AdvanceActiveSprites()
     {
         foreach (var s in _sprites)
         {
-            int frame = (int)(v.Snap.T * s.Fps) % Math.Max(1, s.Frames);
-            double fh = s.FrameH / s.SheetH;
-            SetFrame(s.Layer, Sel("setContentsRect:"),
-                new CGRect(0, 1 - (frame + 1) * fh, s.FrameW / s.SheetW, fh));
+            if (s.ActivityFrames <= 0) continue;
+            s.ActivityOffset += s.ActivityFrames / s.Fps;
+            ObjcVoidD(s.Layer, Sel("setTimeOffset:"), s.ActivityOffset);
         }
     }
+
+    /// <summary>把 sprite sheet 帧序列一次性交给 Core Animation；之后无需 C# tick。</summary>
+    private void InstallSpriteLoop(SpriteNode sprite)
+    {
+        IntPtr values = ObjcIdNuint(objc_getClass("NSMutableArray"),
+            Sel("arrayWithCapacity:"), (nuint)sprite.Frames);
+        double fw = sprite.FrameW / sprite.SheetW;
+        double fh = sprite.FrameH / sprite.SheetH;
+        for (int frame = 0; frame < sprite.Frames; frame++)
+        {
+            var rect = new CGRect(0, 1 - (frame + 1) * fh, fw, fh);
+            IntPtr value = ObjcIdRect(objc_getClass("NSValue"), Sel("valueWithRect:"), rect);
+            ObjcIdPtr(values, Sel("addObject:"), value);
+        }
+        SetFrame(sprite.Layer, Sel("setContentsRect:"),
+            new CGRect(0, 1 - fh, fw, fh));
+        IntPtr animation = Animation("contentsRect");
+        ObjcIdPtr(animation, Sel("setValues:"), values);
+        IntPtr discrete = CfString("discrete");
+        ObjcIdPtr(animation, Sel("setCalculationMode:"), discrete);
+        CfRelease(discrete);
+        ObjcVoidD(animation, Sel("setDuration:"), sprite.Frames / sprite.Fps);
+        ObjcVoidF(animation, Sel("setRepeatCount:"), float.PositiveInfinity);
+        AddAnimation(sprite.Layer, animation, SpriteLoopKey);
+    }
+
+    private void StartIndeterminate(IntPtr layer, double trackW, double height,
+        double inset, double y, IndeterminateDef ind)
+    {
+        StopIndeterminate(layer);
+        if (ind.Mode == IndeterminateMode.Pulse)
+        {
+            double min = Math.Clamp(Sc(ind.MinW), 1, trackW);
+            double max = Math.Clamp(min + Sc(ind.Travel), min, trackW);
+            SetFrame(layer, Sel("setFrame:"), new CGRect(inset, y, min, height));
+            AddNumberAnimation(layer, "bounds.size.width", min, max, 1.25,
+                IndeterminateWidthKey, autoreverses: true);
+            AddNumberAnimation(layer, "position.x", inset + min / 2, inset + max / 2,
+                1.25, IndeterminatePositionKey, autoreverses: true);
+            return;
+        }
+
+        double width = Math.Max(1, trackW * 0.25);
+        SetFrame(layer, Sel("setFrame:"), new CGRect(inset, y, width, height));
+        AddNumberAnimation(layer, "position.x", inset + width / 2,
+            inset + trackW - width / 2, Math.Max(0.1, ind.CycleS),
+            IndeterminatePositionKey, autoreverses: false);
+    }
+
+    private static void StopIndeterminate(IntPtr layer)
+    {
+        RemoveAnimation(layer, IndeterminatePositionKey);
+        RemoveAnimation(layer, IndeterminateWidthKey);
+    }
+
+    private static IntPtr Animation(string keyPath)
+    {
+        _ = CACurrentMediaTime(); // 显式装载 QuartzCore；测试/宿主不必预先触碰动画类
+        IntPtr key = CfString(keyPath);
+        IntPtr animation = ObjcIdPtrRet(objc_getClass("CAKeyframeAnimation"),
+            Sel("animationWithKeyPath:"), key);
+        CfRelease(key);
+        return animation;
+    }
+
+    private static void AddNumberAnimation(IntPtr layer, string keyPath,
+        double from, double to, double duration, string animationKey, bool autoreverses)
+    {
+        _ = CACurrentMediaTime();
+        IntPtr path = CfString(keyPath);
+        IntPtr animation = ObjcIdPtrRet(objc_getClass("CABasicAnimation"),
+            Sel("animationWithKeyPath:"), path);
+        CfRelease(path);
+        ObjcIdPtr(animation, Sel("setFromValue:"), Number(from));
+        ObjcIdPtr(animation, Sel("setToValue:"), Number(to));
+        ObjcVoidD(animation, Sel("setDuration:"), duration);
+        ObjcVoidB(animation, Sel("setAutoreverses:"), autoreverses);
+        ObjcVoidF(animation, Sel("setRepeatCount:"), float.PositiveInfinity);
+        AddAnimation(layer, animation, animationKey);
+    }
+
+    private static void AddAnimation(IntPtr layer, IntPtr animation, string key)
+    {
+        IntPtr name = CfString(key);
+        ObjcVoidPtrPtr(layer, Sel("addAnimation:forKey:"), animation, name);
+        CfRelease(name);
+    }
+
+    private static void RemoveAnimation(IntPtr layer, string key)
+    {
+        IntPtr name = CfString(key);
+        ObjcIdPtr(layer, Sel("removeAnimationForKey:"), name);
+        CfRelease(name);
+    }
+
+    private static IntPtr Number(double value) =>
+        ObjcIdDoubleRet(objc_getClass("NSNumber"), Sel("numberWithDouble:"), value);
 
     // ================================================================ 空间映射
 
@@ -864,17 +950,24 @@ internal sealed class MacLayerSurface : IThemeSurface
     private IntPtr AddDarkImageCopy(IntPtr container, IntPtr img, double x, double y,
         double w, double h, ThemeColor tint)
     {
-        // 半透明黑底 + 贴图:CALayer 的 backgroundColor 画在 contents 之下,
-        // 合成 ≈ 灰阶素材乘 tint(与 gd 的 ×FILL_TINT 视觉近似)
+        // 图片本体 + 以同图 alpha 为 mask 的黑色遮罩。背景色放在 contents 后面
+        // 不会暗化非透明像素；遮罩子层才与 Godot 的灰阶乘法效果一致。
         IntPtr l = NewLayer();
+        IntPtr shade = NewLayer();
+        IntPtr alphaMask = NewLayer();
+        double darken = 1 - Math.Clamp((tint.R + tint.G + tint.B) / 3, 0, 1);
         Transaction(() =>
         {
             SetFrame(l, Sel("setFrame:"), new CGRect(x, y, w, h));
-            ObjcVoidColor(l, Sel("setBackgroundColor:"),
-                Color(new ThemeColor(1 - tint.R, 1 - tint.G, 1 - tint.B, 0.5)));
             ObjcIdPtr(l, Sel("setContents:"), img);
+            SetFrame(shade, Sel("setFrame:"), new CGRect(0, 0, w, h));
+            ObjcVoidColor(shade, Sel("setBackgroundColor:"), Color(0, 0, 0, darken));
+            SetFrame(alphaMask, Sel("setFrame:"), new CGRect(0, 0, w, h));
+            ObjcIdPtr(alphaMask, Sel("setContents:"), img);
+            ObjcIdPtr(shade, Sel("setMask:"), alphaMask);
         });
         ObjcLayer(container, Sel("addSublayer:"), l);
+        ObjcLayer(l, Sel("addSublayer:"), shade);
         return l;
     }
 
@@ -933,11 +1026,11 @@ internal sealed class MacLayerSurface : IThemeSurface
         _thinTrackW = trackW;
     }
 
-    private void PresentThin(SurfaceView v)
+    private void PresentThin(LoadingFrame v)
     {
-        double frac = Math.Clamp(double.IsNaN(v.Snap.Overall) ? 0 : v.Snap.Overall, 0, 1);
+        double frac = Math.Clamp(double.IsNaN(v.Overall) ? 0 : v.Overall, 0, 1);
         // StepText 已含阶段包装(LoadingPresentation),不再叠 [n/7] 前缀
-        string label = v.Snap.StepText != "" ? v.Snap.StepText : v.Snap.DetailText;
+        string label = v.StepText != "" ? v.StepText : v.DetailText;
         IntPtr cf = CfString(label);
         Transaction(() =>
         {
@@ -1068,7 +1161,7 @@ internal sealed class MacLayerSurface : IThemeSurface
         }
     }
 
-    /// <summary>素材装载:NSImage(PNG bytes)→ CGImage,按 src 缓存;缺席 = Zero。</summary>
+    /// <summary>素材装载:ImageIO(PNG bytes)→ owned CGImage,按 src 缓存;缺席 = Zero。</summary>
     private IntPtr LoadImage(string src)
     {
         if (_images.TryGetValue(src, out IntPtr cached)) return cached;
@@ -1088,13 +1181,12 @@ internal sealed class MacLayerSurface : IThemeSurface
                 IntPtr data = CfDataCreate(IntPtr.Zero, bytes, (nint)bytes.LongLength);
                 if (data != IntPtr.Zero)
                 {
-                    IntPtr img = objc_msgSend(objc_getClass("NSImage"), Sel("alloc"));
-                    img = ObjcIdPtrRet(img, Sel("initWithData:"), data);
+                    IntPtr source = CGImageSourceCreateWithData(data, IntPtr.Zero);
                     CfRelease(data);
-                    if (img != IntPtr.Zero)
+                    if (source != IntPtr.Zero)
                     {
-                        result = ObjcId(img, Sel("CGImage"));
-                        ObjcVoid(img, Sel("release"));
+                        result = CGImageSourceCreateImageAtIndex(source, 0, IntPtr.Zero);
+                        CfRelease(source);
                     }
                 }
             }
@@ -1113,6 +1205,10 @@ internal sealed class MacLayerSurface : IThemeSurface
         "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
     private const string LibCg =
         "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
+    private const string LibImageIo =
+        "/System/Library/Frameworks/ImageIO.framework/ImageIO";
+    private const string LibQuartzCore =
+        "/System/Library/Frameworks/QuartzCore.framework/QuartzCore";
 
     [DllImport(LibObjc, EntryPoint = "objc_getClass")]
     private static extern IntPtr objc_getClass(string name);
@@ -1140,6 +1236,9 @@ internal sealed class MacLayerSurface : IThemeSurface
     private static extern void ObjcVoidD(IntPtr self, IntPtr sel, double arg);
 
     [DllImport(LibObjc, EntryPoint = "objc_msgSend")]
+    private static extern void ObjcVoidF(IntPtr self, IntPtr sel, float arg);
+
+    [DllImport(LibObjc, EntryPoint = "objc_msgSend")]
     private static extern void ObjcVoidColor(IntPtr self, IntPtr sel, IntPtr color);
 
     [DllImport(LibObjc, EntryPoint = "objc_msgSend")]
@@ -1147,6 +1246,18 @@ internal sealed class MacLayerSurface : IThemeSurface
 
     [DllImport(LibObjc, EntryPoint = "objc_msgSend")]
     private static extern IntPtr ObjcIdPtrRet(IntPtr self, IntPtr sel, IntPtr arg);
+
+    [DllImport(LibObjc, EntryPoint = "objc_msgSend")]
+    private static extern IntPtr ObjcIdDoubleRet(IntPtr self, IntPtr sel, double arg);
+
+    [DllImport(LibObjc, EntryPoint = "objc_msgSend")]
+    private static extern IntPtr ObjcIdNuint(IntPtr self, IntPtr sel, nuint arg);
+
+    [DllImport(LibObjc, EntryPoint = "objc_msgSend")]
+    private static extern IntPtr ObjcIdRect(IntPtr self, IntPtr sel, CGRect arg);
+
+    [DllImport(LibObjc, EntryPoint = "objc_msgSend")]
+    private static extern void ObjcVoidPtrPtr(IntPtr self, IntPtr sel, IntPtr first, IntPtr second);
 
     [DllImport(LibObjc, EntryPoint = "objc_msgSend")]
     private static extern void ObjcLayer(IntPtr self, IntPtr sel, IntPtr layer);
@@ -1183,6 +1294,16 @@ internal sealed class MacLayerSurface : IThemeSurface
 
     [DllImport(LibCg, EntryPoint = "CGImageGetHeight")]
     private static extern nuint CGImageGetHeight(IntPtr image);
+
+    [DllImport(LibImageIo)]
+    private static extern IntPtr CGImageSourceCreateWithData(IntPtr data, IntPtr options);
+
+    [DllImport(LibImageIo)]
+    private static extern IntPtr CGImageSourceCreateImageAtIndex(
+        IntPtr source, nuint index, IntPtr options);
+
+    [DllImport(LibQuartzCore)]
+    private static extern double CACurrentMediaTime();
 
     [DllImport(LibCf, EntryPoint = "CFStringCreateWithCString")]
     private static extern IntPtr CfStringCreate(IntPtr alloc, byte[] utf8, uint encoding);

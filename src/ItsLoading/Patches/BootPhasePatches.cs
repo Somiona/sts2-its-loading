@@ -260,8 +260,11 @@ internal static class BootPhasePatches
         string summary = ItsLoading.Timeline.BootSummary();
         if (summary != null) Log.Info(summary);
 
+        // SurfaceRouter 已在 Menu 首帧启动视觉淡出；旧时序是等待 2s 后再
+        // 淡出 0.4s，故 +2.4s 才是经过验证的安全销毁点。此前只保持透明
+        // layer，不与活跃的渲染 worker 争用资源。
         var tree = (SceneTree)Engine.GetMainLoop();
-        var timer = tree.CreateTimer(2.0);
+        var timer = tree.CreateTimer(2.4);
         timer.Timeout += () => ItsLoading.Run("remove bar", ItsLoading.RetireBar);
     }
 }

@@ -23,7 +23,7 @@ THEMES_DIR = ROOT / "src" / "ItsLoading" / "themes"
 
 # boot.gd 的桥协议面(C# GdBridgeBar.TryBuild / BootSplash.Handoff 依赖)
 BOOT_CONTRACT = [
-    "csharp_attach", "csharp_present", "takeover",
+    "csharp_attach", "csharp_present", "csharp_set_visible", "takeover",
     "get_workshop_log", "show_hint", "bridge_version", "boot_start_msec",
 ]
 # 主题三动词(boot.gd 的 _apply/takeover 依赖)

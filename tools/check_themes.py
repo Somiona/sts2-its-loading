@@ -136,12 +136,19 @@ def check_theme_json(path: Path) -> None:
 
         # 类型专属结构校验
         if etype == "icon_row":
-            if "cy" not in e and "bottom" not in e:
-                fail(f"{theme}/{eid}: icon_row 需要 cy 或 bottom 之一")
-            if "src" not in e and "pattern" not in e:
-                fail(f"{theme}/{eid}: icon_row 需要 src 或 pattern")
+            if ("cy" in e) == ("bottom" in e):
+                fail(f"{theme}/{eid}: icon_row 必须且只能声明 cy/bottom 之一")
+            if ("src" in e) == ("pattern" in e):
+                fail(f"{theme}/{eid}: icon_row 必须且只能声明 src/pattern 之一")
             if "pattern" in e and "index_base" not in e:
                 fail(f"{theme}/{eid}: pattern 需要 index_base")
+            if "pattern" in e and "%d" not in str(e["pattern"]):
+                fail(f"{theme}/{eid}: pattern 必须包含 %d")
+            if int(e.get("count", 1)) <= 0 or float(e.get("size", 32)) <= 0 \
+                    or float(e.get("gap", 0)) < 0:
+                fail(f"{theme}/{eid}: count/size 必须为正且 gap≥0")
+            if e.get("pivot", "center") not in ("center", "bottom"):
+                fail(f"{theme}/{eid}: pivot 只能是 center/bottom")
             if "enlarge" in e:
                 en = e["enlarge"]
                 if not isinstance(en, dict) or "factor" not in en:
@@ -152,6 +159,8 @@ def check_theme_json(path: Path) -> None:
             of = e.get("of")
             if not isinstance(of, str) or of not in seen_rows:
                 fail(f"{theme}/{eid}: dots.of={of!r} 未先出现(须是先前的 icon_row id)")
+            if float(e.get("scale", 0.2)) <= 0:
+                fail(f"{theme}/{eid}: dots.scale 必须为正")
         if etype == "mask_track":
             members = e.get("members")
             if not isinstance(members, list) or not members:
@@ -168,6 +177,33 @@ def check_theme_json(path: Path) -> None:
             fail(f"{theme}/{eid}: version_label 需要 prefix 字符串")
         if etype in ("logo", "sprite") and not isinstance(e.get("src"), str):
             fail(f"{theme}/{eid}: {etype} 需要 src 字符串")
+        if etype == "sprite" and "activity" in e:
+            activity = e["activity"]
+            if not isinstance(activity, dict) or "frames_per_update" not in activity:
+                fail(f"{theme}/{eid}: activity 需要 {{frames_per_update}}")
+            check_number(theme, eid, "activity.frames_per_update", activity["frames_per_update"])
+            if float(activity["frames_per_update"]) <= 0:
+                fail(f"{theme}/{eid}: activity.frames_per_update 必须为正")
+        if "align" in e and e["align"] not in (0, 1, 2):
+            fail(f"{theme}/{eid}: align 只能是 0/1/2")
+        if etype in ("log_column", "log_rows"):
+            if int(e.get("lines", 1)) <= 0 or float(e.get("line_h", 1)) <= 0 \
+                    or float(e.get("font", 1)) <= 0:
+                fail(f"{theme}/{eid}: log 的 lines/line_h/font 必须为正")
+        if etype == "log_rows" and (float(e.get("w", 0)) <= 0 \
+                or int(e.get("per_line", 1)) <= 0):
+            fail(f"{theme}/{eid}: log_rows 的 w/per_line 必须为正")
+        if etype == "strip" and float(e.get("h", 0)) <= 0:
+            fail(f"{theme}/{eid}: strip.h 必须为正")
+        if etype == "logo" and (float(e.get("w", 0)) <= 0 \
+                or float(e.get("fallback_font", 0)) <= 0):
+            fail(f"{theme}/{eid}: logo.w/fallback_font 必须为正")
+        if etype in ("bar_solid", "bar_outline") and float(e.get("h", 0)) <= 0:
+            fail(f"{theme}/{eid}: bar.h 必须为正")
+        if etype == "bar_outline" and (float(e.get("border_w", 0)) <= 0 \
+                or float(e.get("inset", 0)) < 0 \
+                or float(e.get("inset", 0)) * 2 >= float(e.get("h", 0))):
+            fail(f"{theme}/{eid}: border_w/inset 非法")
         for f in ("src", "pattern"):
             v = e.get(f)
             if isinstance(v, str) and (v.startswith("/") or ".." in v
@@ -183,9 +219,13 @@ def check_theme_json(path: Path) -> None:
                 for f in ("min_w", "travel"):
                     if f not in ind:
                         fail(f"{theme}/{eid}: pulse 缺 {f}")
+                    if float(ind[f]) <= 0:
+                        fail(f"{theme}/{eid}: pulse.{f} 必须为正")
             elif mode == "slide":
                 if "cycle_s" not in ind:
                     fail(f"{theme}/{eid}: slide 缺 cycle_s")
+                elif float(ind["cycle_s"]) <= 0:
+                    fail(f"{theme}/{eid}: slide.cycle_s 必须为正")
             else:
                 fail(f"{theme}/{eid}: indeterminate.mode={mode!r} 非法(pulse|slide)")
 

@@ -506,11 +506,20 @@ class SpriteAnimator extends Node:
 		_frames = maxi(1, frames)
 		_fps = maxf(0.1, fps)
 
-	# 自然帧驱动:同步突发期 _process 不跑 → 自动冻结(与滑段同语义)
+	# Godot adapter 使用自然帧；冻结期由 native adapter 的 compositor 动画接管。
 	func _process(delta: float) -> void:
 		if stopped or _atlas == null:
 			return
 		_elapsed += delta
+		_apply_frame()
+
+	func advance(frames: float) -> void:
+		if stopped or _atlas == null:
+			return
+		_elapsed += frames / _fps
+		_apply_frame()
+
+	func _apply_frame() -> void:
 		var fw: float = _atlas.region.size.x
 		_atlas.region = Rect2(0.0,
 			float(int(_elapsed * _fps) % _frames) * _frame_h,

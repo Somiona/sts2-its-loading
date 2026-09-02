@@ -38,14 +38,13 @@ public static class ItsLoading
     /// <summary>启动时间线,Init 最先创建;进度上报与 Api.LoadingDurations 的查询都走它。</summary>
     internal static BootTimeline Timeline;
 
-    /// <summary>当前主题,Init 的 build bar 步骤创建;在 BaseLib 设置里切换,下次启动生效。</summary>
-    internal static ILoadingTheme Theme;
+    /// <summary>帧 0 起存在的 Godot 基础呈现 adapter。</summary>
+    internal static IGodotSurface GodotSurface;
 
-    /// <summary>冻结期原生呈现协调器(macOS beta 冻结窗口内的进度指示),
-    /// Init 里创建;门控语义与平台面见 render/FreezeScreen.cs。</summary>
-    internal static FreezeScreen Freeze;
+    /// <summary>Godot 基础路径与可选 native 接管路径的唯一所有者。</summary>
+    internal static SurfaceRouter Router;
 
-    /// <summary>唯一加载屏视图模型(文案包装/日志环/不定时钟):Presenter 组合点
+    /// <summary>唯一加载屏视图模型(文案包装/日志环/时间采样):Presenter 组合点
     /// 先经它,再并联喂 gd 主题与原生呈现面 —— 见 render/LoadingPresentation.cs。</summary>
     internal static LoadingPresentation Presentation;
 
@@ -67,48 +66,49 @@ public static class ItsLoading
         // 双时钟注入,构造时记下两者的偏移;呈现是 push 模型 —— Present 密度
         // = 加载活动密度(Presenter 在 build bar 步骤接到主题)
         Timeline = new BootTimeline(() => (long)Time.GetTicksMsec(), () => Sw.ElapsedTicks);
-        // (Beta)原生加载屏渲染器(默认开):关 = 完全旧 gd+C# 路径 —— 不创建
-        // 冻结呈现协调器,连冻结期的原生细条也不出现(排障逃生舱,下次启动生效)
-        if (ThemeRegistry.NativeRendererEnabled())
+        // 主题发现属于共享基础设施，不能受可选 native 路径开关影响。
+        string builtinThemes = System.IO.Path.Combine(
+            System.IO.Path.GetDirectoryName(typeof(ItsLoading).Assembly.Location) ?? ".",
+            "themes");
+        Run("discover themes", () => ThemePacks.DiscoverAndCache(builtinThemes));
+
+        Func<IThemeSurface> nativeFactory = null;
+        bool allowNative = ThemeRegistry.NativeRendererEnabled();
+        if (allowNative && OperatingSystem.IsMacOS())
         {
-            // 原生呈现面消费的 ThemeDef(与 gd interpreter 同一份 theme.json);
+            // 原生呈现面只消费 ThemeCompiler 产出的确定 ThemePlan；
             // 加载失败由面内细条兜底,不阻断
-            ThemeDef? nativeDef = null;
+            ThemePlan nativePlan = null;
             string nativeThemeDir = "";
-            Run("load native theme def", () =>
+            Run("compile native theme plan", () =>
             {
                 // 发现层先于消费:Init 早期,ModManager 已填全 _mods(先于任何 TryLoadMod)
-                string builtinThemes = System.IO.Path.Combine(
-                    System.IO.Path.GetDirectoryName(typeof(ItsLoading).Assembly.Location) ?? ".",
-                    "themes");
-                ThemePacks.DiscoverAndCache(builtinThemes);
                 string id = ThemeRegistry.Current();
                 nativeThemeDir = ThemePacks.DirOf(id) ?? System.IO.Path.Combine(builtinThemes, id);
-                nativeDef = ThemeDef.Load(nativeThemeDir, w => Log.Warn(w));
-                Log.Warn(nativeDef != null
-                    ? $"[ItsLoading] native theme def loaded ({id}, {nativeDef.Elements.Count} elements)"
-                    : "[ItsLoading] native theme def unavailable — thin-bar fallback");
+                nativePlan = ThemeCompiler.Compile(nativeThemeDir, w => Log.Warn(w));
+                Log.Warn(nativePlan != null
+                    ? $"[ItsLoading] native theme plan compiled ({id}, {nativePlan.Elements.Count} elements)"
+                    : "[ItsLoading] native theme plan unavailable — thin-bar fallback");
             });
             string version = typeof(ItsLoading).Assembly.GetName().Version?.ToString() ?? "";
-            Freeze = new FreezeScreen(
-                () => Engine.GetFramesDrawn(),
-                () => System.Threading.Thread.CurrentThread.ManagedThreadId == 1,
-                System.Environment.GetEnvironmentVariable,
-                () => OperatingSystem.IsMacOS()
-                    ? new MacLayerSurface(nativeDef, nativeThemeDir, version, k => I18n.T(k),
-                        ThemeRegistry.CalibViewEnabled())
-                    : null,
-                s => Log.Warn(s),
-                onAttach: () => Run("retire gd theme (native owns pixels)", () => Theme?.Retire()),
-                onBroken: () => Run("revive gd theme (native broke)", () =>
-                {
-                    Theme = GdBridgeBar.TryBuild();
-                    Timeline.Replay();
-                }));
+            if (nativePlan == null || nativePlan.SupportsNative)
+            {
+                nativeFactory = () => new MacLayerSurface(nativePlan, nativeThemeDir, version,
+                    k => I18n.T(k), ThemeRegistry.CalibViewEnabled());
+            }
+            else
+            {
+                Log.Warn("[ItsLoading] selected theme keeps Godot baseline; native incompatibilities: "
+                    + string.Join("; ", nativePlan.NativeIncompatibilities));
+            }
+        }
+        else if (!allowNative)
+        {
+            Log.Warn("[ItsLoading] native renderer OFF (setting) — Godot baseline only this boot");
         }
         else
         {
-            Log.Warn("[ItsLoading] native renderer OFF (setting) — legacy gd path only this boot");
+            Log.Warn("[ItsLoading] native renderer unavailable on this platform — Godot baseline only");
         }
         Run("ensure boot splash installed", BootSplash.Install);
         // 主题 cfg 迁移/补默认(必须在 BuildTheme 前:先于 BaseLib 加载,
@@ -123,9 +123,10 @@ public static class ItsLoading
         // 不会短暂显示硬编码的 1/N。
         Timeline.BeginMods(total, processed, modStep);
         // 正常路径复用帧 0 的 gd 节点;首装/脚本版本不匹配走晚期托管(见 GdBridgeBar)。
-        Run("build bar", BuildTheme);
-        Timeline.Replay();
+        Run("build bar", () => BuildTheme(nativeFactory));
+        // 前奏所有权先一次性交给 C# presentation，再从唯一快照出口 replay。
         Run("boot splash handoff", BootSplash.Handoff);
+        Timeline.Replay();
         // 此刻出帧即完成旧条到新条的切换。连画 3 次:同步突发刚开始时首次
         // 提交可能被 MoltenVK 丢弃(mods 1-4 的单次 ForceDraw 不上屏,约
         // mod 5 恢复),冗余提交让有效帧尽早出现。
@@ -161,59 +162,34 @@ public static class ItsLoading
     /// 旧视图已下线)。再失败 = 本次启动没有加载 UI —— 晚期托管已覆盖上述
     /// 路径,仍失败说明 gd 文件本身有问题(重装 mod 可修复)。
     /// </summary>
-    private static void BuildTheme()
+    private static void BuildTheme(Func<IThemeSurface> nativeFactory)
     {
-        Theme = GdBridgeBar.TryBuild();
-        if (Theme != null)
-        {
-            // 唯一写缝(BootTimeline 是唯一时间线写方)→ 视图模型一次 → 双视图并联:
-            // gd 主题(native 关闭时的全部 / 开启时的帧前期与兜底)+ 原生呈现面
-            //(冻结确立才挂载,挂载即令 gd 退场 —— 无双渲染;见 FreezeScreen)。
-            Timeline.Presenter = s =>
-            {
-                var snap = Presentation.Present(s);
-                Theme.Present(s, snap);
-                Freeze?.Present(s, snap);
-            };
-        }
-        else
-        {
+        GodotSurface = GdBridgeBar.TryBuild();
+        if (GodotSurface == null)
             Log.Error("[ItsLoading] no loading UI this boot (see gd host logs above)");
-            if (Freeze != null)
-                Timeline.Presenter = s => Freeze.Present(s, Presentation.Present(s));
-        }
+        Router = new SurfaceRouter(
+            GodotSurface,
+            () => Engine.GetFramesDrawn(),
+            () => System.Threading.Thread.CurrentThread.ManagedThreadId == 1,
+            System.Environment.GetEnvironmentVariable,
+            nativeFactory,
+            s => Log.Warn(s));
+        Timeline.Connect(s => Router.Present(Presentation.Present(s)));
     }
 
     /// <summary>
-    /// 移除进度条:gd 主题自退;原生呈现面两段式 —— 0.4s 步进淡出后硬拆
-    /// (帧已在流动,CreateTimer 可用;任何异常直接硬拆兜底)。
+    /// 移除进度条：退场细节全部封装在 SurfaceRouter；编排层只发一次 retire。
     /// </summary>
-    internal static void RetireBar()
+    internal static async void RetireBar()
     {
-        Theme?.Retire();
-        Freeze?.Remove("retire");
-        FadeNativeOut();
-    }
-
-    private static async void FadeNativeOut()
-    {
-        if (Freeze == null) return;
+        if (Router == null) return;
         try
         {
-            // Task.Delay 的延续经 Godot 主线程同步上下文恢复(SetOpacity 要求主线程)
-            for (int i = 7; i >= 1; i--)
-            {
-                Freeze.SetOpacity(i / 8.0);
-                await System.Threading.Tasks.Task.Delay(50);
-            }
+            await Router.Retire("retire");
         }
         catch (Exception e)
         {
-            Log.Warn($"[ItsLoading][overlay] fade skipped: {e.Message}");
-        }
-        finally
-        {
-            Freeze.Teardown();
+            Log.Warn($"[ItsLoading] loading surface retire failed: {e.Message}");
         }
     }
 

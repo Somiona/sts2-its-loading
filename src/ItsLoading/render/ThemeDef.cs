@@ -156,11 +156,21 @@ internal sealed record ThemeDef
             }
             switch (e)
             {
+                case StripElement strip when strip.H <= 0:
+                    warn($"[theme] {e.Id}: strip.h 必须为正 — 跳过");
+                    continue;
                 case StripElement:
                     strips.Add(e.Id);
                     break;
+                case LogoElement logo when !SafeAsset(logo.Src) || logo.W <= 0
+                    || logo.FallbackFont <= 0:
+                    warn($"[theme] {e.Id}: logo 路径或尺寸非法 — 跳过");
+                    continue;
                 case LabelElement l when l.Bind is not (ThemeBind.Step or ThemeBind.Detail):
                     warn($"[theme] {e.Id}: label 只能绑 step/detail — 跳过");
+                    continue;
+                case LabelElement l when l.Font <= 0 || l.W < 0 || l.H < 0 || !ValidAlign(l.Align):
+                    warn($"[theme] {e.Id}: label 几何或 align 非法 — 跳过");
                     continue;
                 case BarElementDef b when b.Bind is not (ThemeBind.Overall or ThemeBind.Local):
                     warn($"[theme] {e.Id}: bar 只能绑 overall/local — 跳过");
@@ -168,14 +178,68 @@ internal sealed record ThemeDef
                 case BarElementDef b2 when b2.Indeterminate != null && b2.Bind != ThemeBind.Local:
                     warn($"[theme] {e.Id}: indeterminate 只属于 local 条 — 跳过");
                     continue;
+                case BarElementDef b2 when b2.Indeterminate != null
+                    && !ValidIndeterminate(b2.Indeterminate):
+                    warn($"[theme] {e.Id}: indeterminate 参数必须为正 — 跳过");
+                    continue;
+                case BarElementDef b3 when b3.H <= 0 || (!b3.W.IsFill && b3.W.Value <= 0):
+                    warn($"[theme] {e.Id}: bar 的 w/h 必须为正 — 跳过");
+                    continue;
+                case BarOutlineElement outline when outline.BorderW <= 0 || outline.Inset < 0
+                    || outline.Inset * 2 >= outline.H:
+                    warn($"[theme] {e.Id}: outline border_w/inset 非法 — 跳过");
+                    continue;
+                case IconRowElement r when r.Count <= 0 || r.Size <= 0 || r.Gap < 0:
+                    warn($"[theme] {e.Id}: icon_row 的 count/size 必须为正且 gap≥0 — 跳过");
+                    continue;
+                case IconRowElement r when r.Cy.HasValue == r.Bottom.HasValue:
+                    warn($"[theme] {e.Id}: icon_row 必须且只能声明 cy/bottom 之一 — 跳过");
+                    continue;
+                case IconRowElement r when (r.Src == null) == (r.Pattern == null):
+                    warn($"[theme] {e.Id}: icon_row 必须且只能声明 src/pattern 之一 — 跳过");
+                    continue;
+                case IconRowElement r when r.Pattern != null && !r.Pattern.Contains("%d", StringComparison.Ordinal):
+                    warn($"[theme] {e.Id}: pattern 必须包含 %d — 跳过");
+                    continue;
+                case IconRowElement r when !SafeAsset(r.Src ?? r.Pattern!):
+                    warn($"[theme] {e.Id}: 图标路径必须是主题目录内相对路径 — 跳过");
+                    continue;
+                case IconRowElement r when r.Pivot is not (null or "center" or "bottom"):
+                    warn($"[theme] {e.Id}: pivot 只能是 center/bottom — 跳过");
+                    continue;
                 case IconRowElement r when r.Enlarge != null && r.Enlarge.Factor <= 0:
                     warn($"[theme] {e.Id}: enlarge.factor 必须为正 — 跳过");
                     continue;
                 case DotsElement d when !rows.Contains(d.Of):
                     warn($"[theme] {e.Id}: dots.of '{d.Of}' 未先出现(须是先前的 icon_row)— 跳过");
                     continue;
+                case DotsElement d when d.Scale <= 0:
+                    warn($"[theme] {e.Id}: dots.scale 必须为正 — 跳过");
+                    continue;
                 case MaskTrackElement m when !m.Members.Any(x => rows.Contains(x) || dotSets.Contains(x)):
                     warn($"[theme] {e.Id}: 没有先于本元素出现的可用成员 — 跳过");
+                    continue;
+                case MaskTrackElement m when m.Bind != ThemeBind.Local:
+                    warn($"[theme] {e.Id}: mask_track 只能绑 local — 跳过");
+                    continue;
+                case MaskTrackElement m when !ValidIndeterminate(m.Indeterminate):
+                    warn($"[theme] {e.Id}: mask indeterminate 参数必须为正 — 跳过");
+                    continue;
+                case LogElementDef log when log.Bind != ThemeBind.Log || log.Lines <= 0
+                    || log.LineH <= 0 || log.Font <= 0 || !ValidAlign(log.Align):
+                    warn($"[theme] {e.Id}: log 的 bind/几何/align 非法 — 跳过");
+                    continue;
+                case LogRowsElement log when log.W <= 0 || log.PerLine <= 0:
+                    warn($"[theme] {e.Id}: log_rows 的 w/per_line 必须为正 — 跳过");
+                    continue;
+                case SpriteElement sprite when !SafeAsset(sprite.Src) || sprite.W <= 0
+                    || sprite.H <= 0 || sprite.FrameW <= 0 || sprite.FrameH <= 0
+                    || sprite.Frames <= 0 || sprite.Fps <= 0:
+                    warn($"[theme] {e.Id}: sprite 路径或几何非法 — 跳过");
+                    continue;
+                case SpriteElement sprite when sprite.Activity != null
+                    && sprite.Activity.FramesPerUpdate <= 0:
+                    warn($"[theme] {e.Id}: activity.frames_per_update 必须为正 — 跳过");
                     continue;
             }
             switch (e)
@@ -191,6 +255,21 @@ internal sealed record ThemeDef
         }
         return kept;
     }
+
+    private static bool ValidAlign(int? align) => align is null or 0 or 1 or 2;
+
+    private static bool ValidIndeterminate(IndeterminateDef value) => value.Mode switch
+    {
+        IndeterminateMode.Pulse => value.MinW > 0 && value.Travel > 0,
+        IndeterminateMode.Slide => value.CycleS > 0,
+        _ => false,
+    };
+
+    private static bool SafeAsset(string path) => path.Length > 0
+        && !Path.IsPathRooted(path)
+        && !path.Contains("..", StringComparison.Ordinal)
+        && !path.StartsWith("res://", StringComparison.Ordinal)
+        && !path.StartsWith("user://", StringComparison.Ordinal);
 }
 
 // ---------------------------------------------------------------- 值类型
@@ -504,6 +583,13 @@ internal sealed record SpriteElement : ThemeElementDef
     public int Frames { get; init; } = 1;
     public double Fps { get; init; } = 12;
     public bool Nearest { get; init; } = true;
+    public SpriteActivityDef? Activity { get; init; }
+}
+
+/// <summary>每次有效数据更新额外推进的精灵帧数；基础 fps 始终自主播放。</summary>
+internal sealed record SpriteActivityDef
+{
+    public double FramesPerUpdate { get; init; } = 1;
 }
 
 internal abstract record LogElementDef : ThemeElementDef

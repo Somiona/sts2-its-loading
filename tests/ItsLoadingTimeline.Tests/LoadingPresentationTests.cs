@@ -5,7 +5,7 @@ using Xunit;
 
 #nullable enable
 
-// 唯一加载屏视图模型回归(原 boot.gd/_log_line + FreezeScreen.UpdateLog 双副本
+// 唯一加载屏视图模型回归(原 boot.gd/_log_line + 原生日志双副本
 // 的语义,现为单一事实源):
 //   阶段包装 —— StepText 经注入的 stageText(生产 = I18n bar.stage 同式)
 //   日志环 —— 阶段里程碑 / detail 变化行 / 裸「+ms」带步骤名 / 连续去重 / 上限 60
