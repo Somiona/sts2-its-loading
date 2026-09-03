@@ -7,7 +7,15 @@ changenote 随版本号发出,上传成功后自动把该区改标为发布的�
 
 ## Unreleased
 
-## [v1.0.0] — 2026-09-03
+[v1.0.2] - 2026-09-03
+
+- 修复了 Windows 与 CrossOver/Wine 下选择新主题后关闭画廊会导致游戏崩溃的问题喵
+  - Fixed a crash on Windows and CrossOver/Wine when closing the gallery after selecting a new theme nya
+- 修复了 beta 原生渲染器下经典主题的文字重影:整屏黑底被误写成全透明的 #00000000,盖不住 Godot 先画好的文字;现在是不透明黑底了喵
+  - Fixed ghosted text on the Classic theme under the beta native renderer: the full-screen backdrop was mistakenly written as fully transparent #00000000 and never covered the text Godot drew first — it is now opaque black nya
+
+
+## [v1.0.0] - 2026-09-03
 
 - Windows 现在也有冻结期原生加载画面了：独立 Win32 合成窗口在游戏渲染卡住时仍能继续更新完整主题，CrossOver/Wine 同样支持喵
   - Windows now has a native freeze-phase loading screen too: an independent Win32 composited window keeps the full theme updating while game rendering stalls, including under CrossOver/Wine nya

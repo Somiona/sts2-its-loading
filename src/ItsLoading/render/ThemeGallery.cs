@@ -34,7 +34,19 @@ public static class ThemeGallery
     {
         ItsLoading.Run("show theme gallery", () =>
         {
-            if (_layer != null) { Close(); return; }
+            if (_layer != null)
+            {
+                if (_layer.Visible) Close();
+                else
+                {
+                    _current = ThemeRegistry.Current();
+                    RefreshBorders();
+                    _status.Text = "";
+                    _layer.Visible = true;
+                    foreach (var card in _cards) card.ShowSnapshot();
+                }
+                return;
+            }
             var tree = (SceneTree)Engine.GetMainLoop();
             Vector2 vs = tree.Root.GetVisibleRect().Size;
 
@@ -105,14 +117,10 @@ public static class ThemeGallery
 
     private static void Close()
     {
-        foreach (var card in _cards) card.Retire();
-        _cards.Clear();
-        _layer?.QueueFree();
-        _layer = null;
-        _status = null;
-        _current = null;
-        _kitScript = null;
-        _interpScript = null;
+        // Windows/Wine 的 Vulkan 后端在帧尾销毁这批 SubViewport 树时会硬崩。
+        // 画廊每会话只建一次：关闭时暂停并隐藏，再打开时复用，不产生累积资源。
+        foreach (var card in _cards) card.StopLive();
+        _layer.Visible = false;
     }
 
     /// <summary>点击卡 = 应用:TrySet 写 cfg(下次启动生效),蓝描边前移。</summary>
@@ -283,6 +291,7 @@ public static class ThemeGallery
 
         public void Retire()
         {
+            Viewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Disabled;
             if (_driver != null)
             {
                 _driver.Dispose();

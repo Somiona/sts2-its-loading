@@ -55,14 +55,16 @@ echo "==> 生成 VDF($([ -n "$ITEM_ID" ] && echo "更新物品 $ITEM_ID" || echo
 # 描述:VDF 只上传 en 版(Steam 按语言分条存储,zhs/zht 在工坊页面的语言页签里维护)。
 # changenote:CHANGELOG.md 的 Unreleased 区整体压缩(内部版本号不做分割),见该文件头部约定。
 vdf_escape() { # 文件 → VDF 字符串值。换行保留为真实换行(steamcmd 的
-  # workshop_build_item 不解释 \n 转义,转义会以字面 \n 显示在页面上);
-  # 引号仍转义为 \",否则会截断字符串;内容不应含反斜杠。
+  # workshop_build_item 不解释 \n 转义,转义会以字面 \n 显示在页面上)。
+  # KeyValues 不可靠地处理 \";源内容必须改用单引号/弯引号。
   python3 - "$1" <<'PY'
 import sys
 t = open(sys.argv[1], encoding='utf-8').read().strip()
 if '\\' in t:
     sys.exit('描述内容包含反斜杠,VDF 转义语义不确定——请先处理')
-sys.stdout.write(t.replace('"', '\\"'))
+if '"' in t:
+    sys.exit('描述内容包含直双引号,KeyValues 无法可靠转义——请改用单引号或弯引号')
+sys.stdout.write(t)
 PY
 }
 DESC_ESC=$(vdf_escape steam_desc/en.md)
@@ -75,7 +77,9 @@ body = (m.group(1) if m else '').strip()
 if not body:
     sys.exit('CHANGELOG.md 的 Unreleased 区是空的——先写变化再发布')
 note = f'v{sys.argv[2]}:\n' + '\n'.join(l.strip() for l in body.splitlines() if l.strip())
-print(note.replace('"', '\\"'), end='')
+if '"' in note:
+    sys.exit('CHANGELOG.md 的 Unreleased 含直双引号——请改用单引号或弯引号')
+print(note, end='')
 PY
 )
 cat > "$VDF" <<EOF
@@ -99,7 +103,9 @@ if [ "$STAGE_ONLY" = "--stage-only" ]; then
 fi
 
 echo "==> 上传(密码与 Steam Guard 在提示中输入)"
-steamcmd +login "$ACCOUNT" +workshop_build_item "$VDF" +quit
+UPLOAD_LOG=$(mktemp)
+trap 'rm -f "$UPLOAD_LOG"' EXIT
+steamcmd +login "$ACCOUNT" +workshop_build_item "$VDF" +quit | tee "$UPLOAD_LOG"
 
 # 归档:Unreleased → 本次发布版本号(顶部重建空 Unreleased;内部版本号不单独成节)
 python3 - CHANGELOG.md "$VERSION" <<'PY'

@@ -34,8 +34,8 @@ public sealed class ThemeDefTests
         Assert.NotNull(def);
         Assert.Empty(warns);
         Assert.False(def!.Space.IsDesign);
-        Assert.Equal(6, def.Elements.Count);
-        var strip = Assert.IsType<StripElement>(def.Elements[0]);
+        Assert.Equal(7, def.Elements.Count);
+        var strip = Assert.IsType<StripElement>(def.Elements[1]);
         Assert.Equal(76, strip.H);
         var step = def.Elements.OfType<LabelElement>().Single(l => l.Id == "step");
         Assert.Equal(ThemeBind.Step, step.Bind);

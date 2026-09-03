@@ -3,6 +3,7 @@
   "meta": { "name": "Classic", "author": "Somiona" },
   "space": { "kind": "screen" },
   "elements": [
+    { "id": "bg", "type": "bg", "color": "#000000ff" },
     { "id": "strip",  "type": "strip", "h": 76 },
     { "id": "step",    "type": "label", "parent": "strip", "bind": "step",
       "text": { "loc": "bar.starting" }, "x": 24, "y": 6,
