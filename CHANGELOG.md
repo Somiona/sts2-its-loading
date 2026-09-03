@@ -7,6 +7,10 @@ changenote 随版本号发出,上传成功后自动把该区改标为发布的�
 
 ## Unreleased
 
+## [v1.0.0] — 2026-09-03
+
+- Windows 现在也有冻结期原生加载画面了：独立 Win32 合成窗口在游戏渲染卡住时仍能继续更新完整主题，CrossOver/Wine 同样支持喵
+  - Windows now has a native freeze-phase loading screen too: an independent Win32 composited window keeps the full theme updating while game rendering stalls, including under CrossOver/Wine nya
 - 加载画面现在进入最后一个大阶段时就开始统一淡出,但会等到菜单安全点才释放原生资源,避免与仍在工作的渲染线程争用喵
   - The loading screen now starts its shared fade as soon as the final major stage begins while retaining native resources until the menu-safe disposal point to avoid racing active render workers nya
 - 原生精灵与循环进度现在交给 Core Animation 自主播放,没有数据更新也不会卡住;狐狸还能按加载事件密度在基础跑速上自然加速喵
@@ -18,7 +22,7 @@ changenote 随版本号发出,上传成功后自动把该区改标为发布的�
 - 修好了 GachaTheSpire 原生画面的图标加载、阶段图标重叠、进度蒙版错位和日志未居中,主题编译器现在会统一展开资源与跨元素几何喵
   - Fixed GachaTheSpire native icon loading, overlapping stage icons, misplaced progress masks and left-aligned logs; the theme compiler now resolves assets and cross-element geometry consistently nya
 - 任何人都能做主题啦:一份 theme.json 纯数据就是一个主题包,以普通 mod 的形式发布;启动画面、冻结期原生渲染与画廊预览共用同一份声明,零代码零编译喵
-  - Anyone can make a theme now: one pure-data theme.json shipped as an ordinary mod ("theme pack") drives the boot splash, the freeze-phase native renderer, and the gallery preview from the same declaration — no code, no compiling nya
+  - Anyone can make a theme now: one pure-data theme.json shipped as an ordinary mod (theme pack) drives the boot splash, the freeze-phase native renderer, and the gallery preview from the same declaration — no code, no compiling nya
 - 设置里新增主题画廊:列出全部已装主题并实时预览,点 Apply 下次启动生效,原来的下拉框退役喵
   - A theme gallery has arrived in the settings: it lists every installed theme with a live animated preview; Apply takes effect from the next launch — the old dropdown is retired nya
 - 测试版(beta)分支的冻结期现在由原生渲染直接画完整主题画面:进度条、日志、精灵全部实时更新,直到主菜单淡出喵(设置里「(Beta) Native loading screen renderer」可关)
