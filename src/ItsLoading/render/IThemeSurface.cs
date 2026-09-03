@@ -2,7 +2,7 @@ namespace ItsLoading;
 
 /// <summary>
 /// 冻结期呈现面端口:窗口内原生像素的平台适配(macOS = CALayer 子树,
-/// Windows = 未开工;工厂返回 null = 平台无适配面,静默闲置)。
+/// Windows = 独立 layered window;工厂返回 null = 平台无适配面,静默闲置)。
 /// 生命周期归 SurfaceRouter(何时建/何时熔断),呈现面只负责像素:
 ///   TryAttach —— 定位窗口/层、量边界、建原生视图树(失败 = 本次启动不用)
 ///   Present   —— 应用一次快照(冻结期经显式事务直达系统呈现服务器;

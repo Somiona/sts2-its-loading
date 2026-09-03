@@ -12,7 +12,8 @@ namespace ItsLoading;
 /// </summary>
 internal sealed class SurfaceRouter
 {
-    private const string EnvOff = "ITSLOADING_NO_MAC_OVERLAY";
+    private const string EnvOff = "ITSLOADING_NO_NATIVE_OVERLAY";
+    private const string LegacyMacEnvOff = "ITSLOADING_NO_MAC_OVERLAY";
     private const int WarmupPresents = 3;
     private const int FadeSteps = 16;
     private const int FadeDurationMs = 333; // 原 400ms 的 1.2 倍速
@@ -44,7 +45,7 @@ internal sealed class SurfaceRouter
         _nativeFactory = nativeFactory;
         _warn = warn;
         _delay = delay ?? Task.Delay;
-        _nativeDead = nativeFactory == null || env(EnvOff) == "1";
+        _nativeDead = nativeFactory == null || env(EnvOff) == "1" || env(LegacyMacEnvOff) == "1";
     }
 
     internal bool NativeActive => _native != null && !_nativeDead;

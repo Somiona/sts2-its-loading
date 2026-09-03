@@ -74,7 +74,7 @@ public static class ItsLoading
 
         Func<IThemeSurface> nativeFactory = null;
         bool allowNative = ThemeRegistry.NativeRendererEnabled();
-        if (allowNative && OperatingSystem.IsMacOS())
+        if (allowNative && (OperatingSystem.IsMacOS() || OperatingSystem.IsWindows()))
         {
             // 原生呈现面只消费 ThemeCompiler 产出的确定 ThemePlan；
             // 加载失败由面内细条兜底,不阻断
@@ -93,8 +93,11 @@ public static class ItsLoading
             string version = typeof(ItsLoading).Assembly.GetName().Version?.ToString() ?? "";
             if (nativePlan == null || nativePlan.SupportsNative)
             {
-                nativeFactory = () => new MacLayerSurface(nativePlan, nativeThemeDir, version,
-                    k => I18n.T(k), ThemeRegistry.CalibViewEnabled());
+                nativeFactory = OperatingSystem.IsMacOS()
+                    ? () => new MacLayerSurface(nativePlan, nativeThemeDir, version,
+                        k => I18n.T(k), ThemeRegistry.CalibViewEnabled())
+                    : () => new WindowsLayerSurface(nativePlan, nativeThemeDir, version,
+                        k => I18n.T(k), ThemeRegistry.CalibViewEnabled());
             }
             else
             {
