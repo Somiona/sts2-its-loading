@@ -1,5 +1,6 @@
 {
   "format": 1,
+  "meta": { "name": "Classic", "author": "Somiona" },
   "space": { "kind": "screen" },
   "elements": [
     { "id": "strip",  "type": "strip", "h": 76 },

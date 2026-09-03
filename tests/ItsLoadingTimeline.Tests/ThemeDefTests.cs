@@ -225,4 +225,48 @@ public sealed class ThemeDefTests
         Assert.IsType<BgElement>(def.Elements[0]);
         Assert.Equal(3, warnings.Count);
     }
+
+    // ---- meta 自述块(画廊卡片;与元素校验解耦,任何损坏 → null 回退 id)----
+
+    [Fact]
+    public void ReadMeta_reads_shipped_meta()
+    {
+        var meta = ThemeDef.ReadMeta(Path.Combine(RepoRoot(), "src", "ItsLoading", "themes", "classic"));
+        Assert.NotNull(meta);
+        Assert.Equal("Classic", meta!.Name);
+        Assert.Equal("Somiona", meta.Author);
+    }
+
+    [Fact]
+    public void ReadMeta_falls_back_gracefully()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "itsloading-meta-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string Theme(string json)
+            {
+                string dir = Path.Combine(root, Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(Path.Combine(dir, "theme.json"), json);
+                return dir;
+            }
+
+            // 无 meta / 坏 JSON / meta 非对象 → null
+            Assert.Null(ThemeDef.ReadMeta(Theme(
+                """{"format":1, "elements":[{"id":"s","type":"label","text":"x","x":0,"y":0,"font":9,"color":"#ffffffff"}]}""")));
+            Assert.Null(ThemeDef.ReadMeta(Theme("not json")));
+            Assert.Null(ThemeDef.ReadMeta(Theme("""{"format":1, "meta": "oops", "elements":[]}""")));
+            // 部分 meta:缺 name 只留 author;name 空白 = 无有效名
+            var part = ThemeDef.ReadMeta(Theme(
+                """{"format":1, "meta": {"author": " Someone "}, "elements":[]}"""));
+            Assert.NotNull(part);
+            Assert.Null(part!.Name);
+            Assert.Equal("Someone", part.Author);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }

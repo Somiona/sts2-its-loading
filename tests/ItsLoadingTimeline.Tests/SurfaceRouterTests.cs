@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using ItsLoading;
 using Xunit;
 
@@ -44,6 +45,7 @@ public sealed class SurfaceRouterTests
         public readonly Dictionary<string, string?> Env = new();
         public bool NativeAvailable = true;
         public int FactoryCalls;
+        public readonly List<int> Delays = new();
         public readonly SurfaceRouter Router;
 
         public Rig(bool allowNative = true)
@@ -54,7 +56,11 @@ public sealed class SurfaceRouterTests
                 () => true,
                 k => Env.TryGetValue(k, out var value) ? value : null,
                 allowNative ? () => { FactoryCalls++; return NativeAvailable ? Native : null; } : null,
-                _ => { }, _ => System.Threading.Tasks.Task.CompletedTask);
+                _ => { }, ms =>
+                {
+                    Delays.Add(ms);
+                    return System.Threading.Tasks.Task.CompletedTask;
+                });
         }
 
         public void Present(int stage = 2, string step = "s") => Router.Present(Frame(stage, step));
@@ -154,8 +160,9 @@ public sealed class SurfaceRouterTests
         r.Router.Retire("done").GetAwaiter().GetResult();
         r.Router.Retire("done-again").GetAwaiter().GetResult();
         Assert.Equal(1, r.Godot.Retires);
-        Assert.Equal(new[] { 7 / 8.0, 6 / 8.0, 5 / 8.0, 4 / 8.0,
-            3 / 8.0, 2 / 8.0, 1 / 8.0 }, r.Native.Opacities);
+        Assert.Equal(Enumerable.Range(1, 16).Select(i => 1.0 - i / 16.0),
+            r.Native.Opacities);
+        Assert.Equal(333, r.Delays.Sum());
         Assert.Equal(1, r.Native.Teardowns);
     }
 
@@ -170,7 +177,7 @@ public sealed class SurfaceRouterTests
         Assert.Equal(BootStage.Menu, r.Native.Last.Stage);
         Assert.Equal(2, r.Native.Presents);
         Assert.Equal(1, r.Godot.Retires);
-        Assert.Equal(7, r.Native.Opacities.Count);
+        Assert.Equal(0.0, r.Native.Opacities[^1]);
         Assert.Equal(0, r.Native.Teardowns);
         r.Present(stage: 6, step: "late");
         Assert.Equal(2, r.Native.Presents);

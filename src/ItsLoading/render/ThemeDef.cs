@@ -20,6 +20,9 @@ namespace ItsLoading;
 /// warn 回调上报);整体(format ≠ 1 / 无元素存活 / theme.json 不可读)→
 /// Load 返回 null,调用方走回退链。纯 BCL:不触 Godot 类型,离线可单测。
 /// </summary>
+/// <summary>主题自述(theme.json 可选 meta 块;画廊卡片展示用,不参与渲染)。</summary>
+internal sealed record ThemeMetaDef(string? Name, string? Author);
+
 internal sealed record ThemeDef
 {
     public const int CurrentFormat = 1;
@@ -54,6 +57,30 @@ internal sealed record ThemeDef
             return null;
         }
         return Parse(json, warn);
+    }
+
+    /// <summary>
+    /// 只读 meta 自述块(画廊卡片文案)。与元素校验解耦 —— 发现层列得出的主题
+    /// 就该有名字,即使元素解析失败;任何缺失/损坏 → null,卡片回退显示 id。
+    /// </summary>
+    public static ThemeMetaDef? ReadMeta(string themeDir)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(
+                File.ReadAllText(Path.Combine(themeDir, "theme.json")));
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("meta", out var meta)
+                || meta.ValueKind != JsonValueKind.Object) return null;
+            string? Read(string key) => meta.TryGetProperty(key, out var v)
+                && v.ValueKind == JsonValueKind.String ? v.GetString()?.Trim() : null;
+            var result = new ThemeMetaDef(Read("name"), Read("author"));
+            return result.Name != null || result.Author != null ? result : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>解析 + 校验(与 Load 同语义;独立出来供测试与内联 JSON 用)。</summary>

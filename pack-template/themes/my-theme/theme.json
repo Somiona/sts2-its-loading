@@ -1,5 +1,6 @@
 {
   "format": 1,
+  "meta": { "name": "My Theme", "author": "Your Name" },
   "space": {
     "kind": "design",
     "w": 854,

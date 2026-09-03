@@ -14,6 +14,8 @@ internal sealed class SurfaceRouter
 {
     private const string EnvOff = "ITSLOADING_NO_MAC_OVERLAY";
     private const int WarmupPresents = 3;
+    private const int FadeSteps = 16;
+    private const int FadeDurationMs = 333; // 原 400ms 的 1.2 倍速
 
     private readonly IGodotSurface? _godot;
     private readonly Func<long> _framesDrawn;
@@ -131,10 +133,13 @@ internal sealed class SurfaceRouter
         if (_native == null) return;
         try
         {
-            for (int i = 7; i >= 1; i--)
+            int elapsed = 0;
+            for (int step = 1; step <= FadeSteps; step++)
             {
-                _native.SetOpacity(i / 8.0);
-                await _delay(50);
+                int next = step * FadeDurationMs / FadeSteps;
+                await _delay(next - elapsed);
+                elapsed = next;
+                _native.SetOpacity(1.0 - step / (double)FadeSteps);
             }
         }
         catch (Exception e)

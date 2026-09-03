@@ -7,7 +7,7 @@ macOS 冻结期原生呈现面、游戏内画廊实时预览)—— 声明一次
 
 - 快速上手:复制仓库 `pack-template/` 改起
 - 词汇表校验:`python3 tools/check_themes.py <主题目录>`(发布前必过)
-- 实时预览:游戏内 设置 → 本 mod → **Theme gallery**(选主题,Apply 下次启动生效)
+- 实时预览:游戏内 设置 → 本 mod → **Theme gallery**(三列卡片,hover 实时播放,点击即应用,下次启动生效)
 - 布局标定:设置里开 **(Debug) Developer calibration view** → 品红元素框 + 10% 网格
 
 ## 主题包 = 一个普通 mod
@@ -30,6 +30,7 @@ id 冲突时内置主题赢;主题包之间按加载序先到先得。
 ```jsonc
 {
   "format": 1,                                   // 词汇表版本(当前 1)
+  "meta": { "name": "My Theme", "author": "You" },  // 可选自述(画廊卡片展示)
   "space": { "kind": "design", "w": 854, "h": 480 },  // 或 {"kind":"screen"}(视口像素)
   "elements": [ … ]                              // z 序 = 数组序
 }
@@ -37,6 +38,9 @@ id 冲突时内置主题赢;主题包之间按加载序先到先得。
 
 **空间**:`design` = 854×480(或自定义)设计画布等比居中缩放,推荐;
 `screen` = 直接用视口像素(classic 底条用)。所有长度/字体 = 所选空间的单位。
+
+**meta(可选)**:画廊卡片的主题名与作者(`name`/`author` 均可省略;
+缺 name 卡片回退显示主题 id,缺 author 整行不显示)。不参与渲染。
 
 ## 元素词汇表
 

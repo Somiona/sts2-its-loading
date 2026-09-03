@@ -72,6 +72,7 @@ func _run_theme(id: String) -> void:
 	await get_tree().create_timer(1.0).timeout
 	_snap(shots, "01_boot_ready_stage1")
 	_readback(id, "stage1")
+	await _check_sprite_playback(id)
 	boot.csharp_attach()
 	boot.csharp_present(0.30, 0.40, 2, "[2/7] Loading mods", "ItsLoading.dll +12ms", ["preview workshop A"])
 	await get_tree().create_timer(0.3).timeout
@@ -133,6 +134,33 @@ func _readback(id: String, tag: String) -> void:
 	var layer = boot.get("_layer")
 	if layer != null:
 		_check_contains(layer, "%s/%s" % [id, tag])
+
+
+func _check_sprite_playback(id: String) -> void:
+	var theme = boot.get("_theme_node")
+	if theme == null or not theme.has_method("inspect"):
+		return
+	var sprites: Dictionary = theme.inspect()["sprites"]
+	if sprites.is_empty():
+		return
+	if not theme.has_method("theme_set_playing"):
+		_fails += 1
+		push_error("[preview] %s sprite 缺播放门控" % id)
+		return
+	var animator = sprites.values()[0]
+	var atlas: AtlasTexture = animator.get("_atlas")
+	theme.theme_set_playing(false)
+	var paused := atlas.region.position.y
+	await get_tree().create_timer(0.35).timeout
+	if not is_equal_approx(atlas.region.position.y, paused):
+		_fails += 1
+		push_error("[preview] %s sprite 暂停后仍在动" % id)
+	theme.theme_set_playing(true)
+	await get_tree().create_timer(0.35).timeout
+	if is_equal_approx(atlas.region.position.y, paused):
+		_fails += 1
+		push_error("[preview] %s sprite 恢复后未播放" % id)
+	print("[preview] ", id, " sprite pause/resume checked")
 
 
 # 全树越轨断言:条填充(Panel/ColorRect 轨的 ColorRect 子节点)恒在轨内。

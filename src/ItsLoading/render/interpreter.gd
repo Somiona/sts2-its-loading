@@ -231,6 +231,11 @@ func theme_apply(snap: Dictionary) -> void:
 	_last_activity_serial = activity_serial
 
 
+func theme_set_playing(playing: bool) -> void:
+	for sprite in _sprites.values():
+		sprite.stopped = not playing or _retired
+
+
 func theme_retire() -> void:
 	_retired = true
 	for sprite in _sprites.values():

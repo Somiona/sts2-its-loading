@@ -80,6 +80,18 @@ def check_theme_json(path: Path) -> None:
     if data.get("format") != FORMAT_VERSION:
         fail(f"{theme}: format={data.get('format')!r} ≠ {FORMAT_VERSION}")
 
+    meta = data.get("meta")
+    if meta is not None:
+        if not isinstance(meta, dict):
+            fail(f"{theme}: meta 非对象:{meta!r}")
+        else:
+            extra = set(meta) - {"name", "author"}
+            if extra:
+                fail(f"{theme}: meta 未知键 {sorted(extra)}(可用:name, author)")
+            for k in ("name", "author"):
+                if k in meta and (not isinstance(meta[k], str) or not meta[k].strip()):
+                    fail(f"{theme}: meta.{k} 必须是非空字符串")
+
     space = data.get("space", {"kind": "screen"})
     if not isinstance(space, dict) or space.get("kind") not in ("screen", "design"):
         fail(f"{theme}: space 非法:{space!r}(应为 screen 或 design)")

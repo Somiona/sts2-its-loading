@@ -1,5 +1,6 @@
 {
   "format": 1,
+  "meta": { "name": "Minespire", "author": "Somiona" },
   "space": { "kind": "design", "w": 854, "h": 480 },
   "elements": [
     { "id": "bg", "type": "bg", "color": "#ef323dff" },
