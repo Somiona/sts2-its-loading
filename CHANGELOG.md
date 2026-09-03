@@ -7,8 +7,10 @@ changenote 随版本号发出,上传成功后自动把该区改标为发布的�
 
 ## Unreleased
 
-[v1.0.2] - 2026-09-03
+## [v1.0.2] — 2026-09-03
 
+- 修复了加载阶段切到别的窗口时游戏反复抢回前台的问题喵:
+  - Fixed the game repeatedly stealing the foreground when you switched to another window during loading nya
 - 修复了 Windows 与 CrossOver/Wine 下选择新主题后关闭画廊会导致游戏崩溃的问题喵
   - Fixed a crash on Windows and CrossOver/Wine when closing the gallery after selecting a new theme nya
 - 修复了 beta 原生渲染器下经典主题的文字重影:整屏黑底被误写成全透明的 #00000000,盖不住 Godot 先画好的文字;现在是不透明黑底了喵

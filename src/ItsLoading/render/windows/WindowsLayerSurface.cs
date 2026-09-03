@@ -33,7 +33,7 @@ internal sealed class WindowsLayerSurface : IThemeSurface
     private IntPtr _game, _overlay, _dc, _dib, _oldBitmap, _bits, _graphics, _fontFamily;
     private nuint _gdipToken;
     private int _width, _height;
-    private bool _ready, _stop, _dirty;
+    private bool _ready, _stop, _dirty, _shown;
     private byte _opacity = 255;
     private LoadingFrame _frame;
     private bool _hasFrame;
@@ -172,14 +172,20 @@ internal sealed class WindowsLayerSurface : IThemeSurface
         if (!IsWindow(_game) || IsIconic(_game) || !GetClientRect(_game, out Rect r))
         {
             ShowWindow(_overlay, 0);
+            _shown = false;
             return false;
         }
         var point = new Point(r.Left, r.Top);
         if (!ClientToScreen(_game, ref point)) return false;
         int w = r.Right - r.Left, h = r.Bottom - r.Top;
         if (w < 50 || h < 50) return false;
+        // 只 move/size,绝不反复断言 z 序:overlay 是 game 的 owned 窗口,
+        // HWND_TOP 会连带把 owner 拖到 z 序前端 —— 用户切到别的窗口时游戏会
+        // 不停抢回前台。显示只做一次;位置/尺寸本身由 UpdateLayeredWindow
+        // 每帧携带,这里无需 z 序参与。
         SetWindowPos(_overlay, IntPtr.Zero, point.X, point.Y, w, h,
-            SwpNoActivate | SwpShowWindow);
+            SwpNoActivate | SwpNoZorder | SwpNoOwnerZorder | (_shown ? 0 : SwpShowWindow));
+        _shown = true;
         if (w != _width || h != _height) CreateGraphics(w, h);
         return _graphics != IntPtr.Zero;
     }
@@ -631,7 +637,8 @@ internal sealed class WindowsLayerSurface : IThemeSurface
     private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
     private const uint ExLayered = 0x80000, ExTransparent = 0x20, ExNoActivate = 0x08000000,
-        ExToolWindow = 0x80, WsPopup = 0x80000000, SwpNoActivate = 0x10, SwpShowWindow = 0x40;
+        ExToolWindow = 0x80, WsPopup = 0x80000000, SwpNoActivate = 0x10, SwpShowWindow = 0x40,
+        SwpNoZorder = 0x4, SwpNoOwnerZorder = 0x200;
 
     [DllImport("user32", SetLastError=true)] private static extern IntPtr CreateWindowExW(uint ex, [MarshalAs(UnmanagedType.LPWStr)] string cls, [MarshalAs(UnmanagedType.LPWStr)] string name, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
     [DllImport("user32")] private static extern bool DestroyWindow(IntPtr hwnd);
