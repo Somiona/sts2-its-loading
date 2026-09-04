@@ -33,6 +33,8 @@ public static class ItsLoading
     /// <summary>本 mod 的 manifest id,须与 ItsLoading.json、boot.gd 的 MOD_ID 一致。</summary>
     internal const string ModId = "ItsLoading";
 
+    private const string ModLaunchManagerId = "ModLaunchManager";
+
     internal static readonly Stopwatch Sw = Stopwatch.StartNew();
 
     /// <summary>启动时间线,Init 最先创建;进度上报与 Api.LoadingDurations 的查询都走它。</summary>
@@ -198,6 +200,8 @@ public static class ItsLoading
 
     /// <summary>
     /// 耗时测量依赖"我们在其他 mod 之前加载"(补丁装上后才能观测后续加载)。
+    /// ModLaunchManager 已加载时由它按 manifest 的 loadPriority 管理顺序,这里
+    /// 保留确认后的计划位置,不再直接改写 _mods。
     /// 新安装/改名后 mod_list 没有我们 → 排序沉底,只能观测到尾部。
     /// 游戏 Initialize 结尾会按 _mods 顺序重建 mod_list,退出时由游戏自行
     /// 保存设置,因此这里只做内存重排,绝不写用户的 settings.save。
@@ -235,6 +239,12 @@ public static class ItsLoading
             return processed;
         }
         if (idx < 0) return processed;
+        if (IsLoadOrderManaged(ModManager.GetLoadedMods().Select(mod => mod.manifest?.id)))
+        {
+            Log.Warn($"[ItsLoading] load order managed by {ModLaunchManagerId}; " +
+                     $"keeping declared position #{idx + 1}");
+            return processed;
+        }
         if (idx == 0)
         {
             if (loadedBeforeUs > 0)
@@ -259,4 +269,7 @@ public static class ItsLoading
                  $"{loadedBeforeUs} mods loaded before us) — full timing coverage from next boot");
         return processed;
     }
+
+    internal static bool IsLoadOrderManaged(System.Collections.Generic.IEnumerable<string> loadedModIds) =>
+        loadedModIds.Any(id => string.Equals(id, ModLaunchManagerId, StringComparison.Ordinal));
 }

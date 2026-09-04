@@ -7,5 +7,6 @@
   "has_pck": true,
   "has_dll": true,
   "dependencies": [],
+  "loadPriority": "first",
   "affects_gameplay": false
 }
