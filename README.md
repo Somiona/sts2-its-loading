@@ -49,7 +49,7 @@
 ## 兼容性
 
 - 在 Slay the Spire 2  v0.107.1上测试通过
-- 和其他 mod 没有加载顺序冲突,不需要当前置
+- 安装 ModLaunchManager 时,模组加载与失败处理由管理器显示;本模组从后续启动阶段恢复进度画面
 
 ## 已知限制
 
@@ -110,7 +110,7 @@ Turn it off in the in-game mod menu, unsubscribe, or delete the mod folder — w
 ## Compatibility
 
 - Tested on Slay the Spire 2 v0.107.1
-- No load-order requirements, no conflicts with other mods
+- With ModLaunchManager installed, the manager displays mod loading and failure recovery; this mod resumes its progress view for the later startup stages
 
 ## Known Limitations
 

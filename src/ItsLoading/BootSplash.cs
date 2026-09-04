@@ -288,7 +288,7 @@ internal static class BootSplash
             }
             Log.Warn(ItsLoading.GodotSurface is GdBridgeBar
                 ? "[ItsLoading] gd boot view retained as the active loading UI"
-                : "[ItsLoading] autoload node present but not hosting (late host active)");
+                : "[ItsLoading] autoload node present without a C# rendering host");
         }
         else
         {
@@ -296,5 +296,17 @@ internal static class BootSplash
             // 前两者由晚期托管兜底;日志里若同时没有任何 [LoadingBarBoot] 行,即加载失败。
             Log.Warn("[ItsLoading] no boot splash autoload node — late host is the UI this boot");
         }
+    }
+
+    /// <summary>
+    /// ModLaunchManager 拥有第二阶段时,前奏数据读取完成后关闭帧 0 启动画面。
+    /// 第三个阶段会由 ItsLoading 按需创建新的呈现面,不会与管理器的失败处理界面重叠。
+    /// </summary>
+    internal static void ReleaseToModLaunchManager()
+    {
+        var boot = ((SceneTree)Engine.GetMainLoop()).Root.GetNodeOrNull(AutoloadName);
+        if (boot == null || !boot.HasMethod("takeover")) return;
+        boot.Call("takeover");
+        Log.Warn("[ItsLoading] boot view released to ModLaunchManager for the mod stage");
     }
 }

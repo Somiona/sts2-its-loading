@@ -7,6 +7,9 @@ changenote 随版本号发出,上传成功后自动把该区改标为发布的�
 
 ## Unreleased
 
+- 兼容 ModLaunchManager 的分帧加载:通过清单声明优先加载,检测到管理器后把整个模组加载阶段与失败处理画面交给它,第三阶段再恢复本模组的启动画面喵
+  - Added compatibility with ModLaunchManager's frame-by-frame loading: declare early loading, hand the complete mod-loading stage and failure UI to the manager, then resume this mod's boot view from stage three nya
+
 ## [v1.0.2] — 2026-09-03
 
 - 修复了加载阶段切到别的窗口时游戏反复抢回前台的问题喵:

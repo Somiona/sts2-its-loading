@@ -63,6 +63,7 @@ var _strings := {}
 # ---- 安全网 ----
 var _frozen := false
 var _frozen_msec := 0         # 冻结起点:冻结分支安全网从这点起算(冷缓存工坊扫描可远超 30s)
+var _frozen_frame := -1       # 首个 dll 行所在帧:后续仍出帧说明分帧加载器接管,应恢复轮询
 var _last_activity_msec := 0  # 最近一次观测到 godot.log 增长的时刻:接管前安全网按「静默」计时
 # ---- 桥/快照驱动 ----
 var _bridge_attached := false
@@ -313,12 +314,18 @@ func _process(delta: float) -> void:
 			takeover()
 		return
 	if _frozen:
-		# 同步突发已开始(首个 mod dll 加载,帧停止流动)。冻结一切 UI 变更——
-		# 阻塞瞬间若存在未提交的文字变更(字形重排异步),已呈现帧会被渲染端
-		# 失效 → 前奏与后续之间黑屏。60s 安全网从冻结起点起算(前置阶段合法地可超 30s)。
-		if _frozen_msec > 0 and Time.get_ticks_msec() - _frozen_msec > 60000:
-			takeover()
-		return
+		# 原版同步加载会从首个 dll 行起停止出帧;分帧加载器则会继续渲染。
+		# 看到后续帧时恢复轮询,否则维持最后一张已提交画面并等待 C# 接管。
+		if Engine.get_frames_drawn() > _frozen_frame:
+			_frozen = false
+			_frozen_msec = 0
+			_last_activity_msec = Time.get_ticks_msec()
+			print("[LoadingBarBoot] render loop continued after DLL load — resuming boot view")
+		else:
+			# 60s 安全网从冻结起点起算(前置阶段合法地可超 30s)。
+			if _frozen_msec > 0 and Time.get_ticks_msec() - _frozen_msec > 60000:
+				takeover()
+			return
 	_t += delta
 	_poll_acc += delta
 	if _poll_acc >= 0.1:
@@ -593,6 +600,7 @@ func _handle_line(line: String) -> void:
 			_ws_end_msec = Time.get_ticks_msec()
 		if not _frozen:
 			_frozen_msec = Time.get_ticks_msec()
+			_frozen_frame = Engine.get_frames_drawn()
 		_frozen = true
 
 
@@ -754,9 +762,8 @@ func takeover() -> void:
 	_done = true
 	if _theme_node != null and _theme_node.has_method("theme_retire"):
 		_theme_node.theme_retire()
-	# 帧是否流动:_frozen 在首个 mod dll 加载时置位且永不复位,接管后仍为 true——
-	# 真正冻结的只有「冻结分支安全网」这一个调用点,那里 tween 永不推进,
-	# 必须立即隐藏;其余路径(看门狗/菜单就绪)帧都在流动。
+	# 真正冻结的只有「冻结分支安全网」这个调用点,那里 tween 永不推进,
+	# 必须立即隐藏;其余路径(分帧恢复/看门狗/菜单就绪)帧都在流动。
 	var frames_alive := not _frozen or _bridge_attached
 	if _root != null and frames_alive:
 		var tw := create_tween()
