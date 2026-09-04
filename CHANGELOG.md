@@ -7,8 +7,8 @@ changenote 随版本号发出,上传成功后自动把该区改标为发布的�
 
 ## Unreleased
 
-- 兼容 ModLaunchManager 的分帧加载:通过清单声明优先加载,检测到管理器接管时保留其计划顺序,启动画面在 DLL 加载后仍有新帧时会自动恢复轮询喵
-  - Added compatibility with ModLaunchManager's frame-by-frame loading: declare early loading in the manifest, preserve the manager's confirmed order, and resume boot-view polling when frames continue after DLL loading starts nya
+- 兼容 ModLaunchManager 的分帧加载:通过清单声明优先加载,检测到管理器后把整个模组加载阶段与失败处理画面交给它,第三阶段再恢复本模组的启动画面喵
+  - Added compatibility with ModLaunchManager's frame-by-frame loading: declare early loading, hand the complete mod-loading stage and failure UI to the manager, then resume this mod's boot view from stage three nya
 
 ## [v1.0.2] — 2026-09-03
 

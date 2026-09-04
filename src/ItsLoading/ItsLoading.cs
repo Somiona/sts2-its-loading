@@ -35,6 +35,8 @@ public static class ItsLoading
 
     private const string ModLaunchManagerId = "ModLaunchManager";
 
+    private static bool _modStageDelegated;
+
     internal static readonly Stopwatch Sw = Stopwatch.StartNew();
 
     /// <summary>启动时间线,Init 最先创建;进度上报与 Api.LoadingDurations 的查询都走它。</summary>
@@ -65,6 +67,8 @@ public static class ItsLoading
             ["name"] = step,
         }));
         int total = Math.Max(1, ModManager.Mods.Count);
+        _modStageDelegated = IsLoadOrderManaged(
+            ModManager.GetLoadedMods().Select(mod => mod.manifest?.id));
         // 双时钟注入,构造时记下两者的偏移;呈现是 push 模型 —— Present 密度
         // = 加载活动密度(Presenter 在 build bar 步骤接到主题)
         Timeline = new BootTimeline(() => (long)Time.GetTicksMsec(), () => Sw.ElapsedTicks);
@@ -127,20 +131,40 @@ public static class ItsLoading
         // 先建立时间线快照再建主题,主题从同一份初始状态起画,
         // 不会短暂显示硬编码的 1/N。
         Timeline.BeginMods(total, processed, modStep);
-        // 正常路径复用帧 0 的 gd 节点;首装/脚本版本不匹配走晚期托管(见 GdBridgeBar)。
-        Run("build bar", () => BuildTheme(nativeFactory));
+        if (_modStageDelegated)
+        {
+            // ModLaunchManager 拥有整个 mod 加载阶段,包括失败后的玩家操作。
+            // 此处只接后续阶段;第一个 Essential 事件到达时才重新建立呈现面。
+            Run("connect post-manager loading UI", () => ConnectAfterManagedModStage(nativeFactory));
+        }
+        else
+        {
+            // 正常路径复用帧 0 的 gd 节点;首装/脚本版本不匹配走晚期托管(见 GdBridgeBar)。
+            Run("build bar", () => BuildTheme(nativeFactory));
+        }
         // 前奏所有权先一次性交给 C# presentation，再从唯一快照出口 replay。
         Run("boot splash handoff", BootSplash.Handoff);
+        if (_modStageDelegated)
+        {
+            Run("hand mod stage to ModLaunchManager", BootSplash.ReleaseToModLaunchManager);
+        }
         Timeline.Replay();
         // 此刻出帧即完成旧条到新条的切换。连画 3 次:同步突发刚开始时首次
         // 提交可能被 MoltenVK 丢弃(mods 1-4 的单次 ForceDraw 不上屏,约
         // mod 5 恢复),冗余提交让有效帧尽早出现。
-        Run("first paint", () =>
+        if (!_modStageDelegated) Run("first paint", () =>
         {
             for (int i = 0; i < 3; i++) RenderingServer.ForceDraw();
         });
         FreezeProbe.Sample("after-first-paint");
-        Run("patch loader", LoaderPatches.Install);
+        if (_modStageDelegated)
+        {
+            Log.Warn("[ItsLoading] mod stage delegated to ModLaunchManager");
+        }
+        else
+        {
+            Run("patch loader", LoaderPatches.Install);
+        }
         Run("patch boot phases", BootPhasePatches.Install);
         Run("patch mod info icon", ModInfoIconPatches.Install);
         Log.Warn($"[ItsLoading] watching {total} mods ({processed} already processed)");
@@ -169,6 +193,25 @@ public static class ItsLoading
     /// </summary>
     private static void BuildTheme(Func<IThemeSurface> nativeFactory)
     {
+        BuildSurfaceRouter(nativeFactory);
+        Timeline.Connect(s => Router.Present(Presentation.Present(s)));
+    }
+
+    private static void ConnectAfterManagedModStage(Func<IThemeSurface> nativeFactory)
+    {
+        Timeline.Connect(state =>
+        {
+            if (!ShouldPresentStage(modStageDelegated: true, state.Stage)) return;
+            if (Router == null)
+            {
+                Run("resume loading UI after ModLaunchManager", () => BuildSurfaceRouter(nativeFactory));
+            }
+            Router?.Present(Presentation.Present(state));
+        });
+    }
+
+    private static void BuildSurfaceRouter(Func<IThemeSurface> nativeFactory)
+    {
         GodotSurface = GdBridgeBar.TryBuild();
         if (GodotSurface == null)
             Log.Error("[ItsLoading] no loading UI this boot (see gd host logs above)");
@@ -179,7 +222,6 @@ public static class ItsLoading
             System.Environment.GetEnvironmentVariable,
             nativeFactory,
             s => Log.Warn(s));
-        Timeline.Connect(s => Router.Present(Presentation.Present(s)));
     }
 
     /// <summary>
@@ -239,7 +281,7 @@ public static class ItsLoading
             return processed;
         }
         if (idx < 0) return processed;
-        if (IsLoadOrderManaged(ModManager.GetLoadedMods().Select(mod => mod.manifest?.id)))
+        if (_modStageDelegated)
         {
             Log.Warn($"[ItsLoading] load order managed by {ModLaunchManagerId}; " +
                      $"keeping declared position #{idx + 1}");
@@ -272,4 +314,7 @@ public static class ItsLoading
 
     internal static bool IsLoadOrderManaged(System.Collections.Generic.IEnumerable<string> loadedModIds) =>
         loadedModIds.Any(id => string.Equals(id, ModLaunchManagerId, StringComparison.Ordinal));
+
+    internal static bool ShouldPresentStage(bool modStageDelegated, BootStage stage) =>
+        !modStageDelegated || stage != BootStage.Mods;
 }
